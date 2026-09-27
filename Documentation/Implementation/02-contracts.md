@@ -7,7 +7,7 @@ Spend a short discussion agreeing these values before writing connected function
 | Value | Simple representation |
 | --- | --- |
 | Frame | Dictionary with `frame_id`, image/path, `height`, `width`, `boxes`, and `scores`. |
-| Boxes | `[D,4]` in internal zero-origin `(x1,y1,x2,y2)` pixels. Convert input origin once in `data.py`, and reverse it during MOT export. |
+| Boxes | `[D,4]` in internal zero-origin `(x1,y1,x2,y2)` pixels. Convert input origin once in `Utils/data.py`, and reverse it during MOT export. |
 | Scores | `[D]`, preserving the supplied detection confidence. |
 | Features | `[D,F]`, exactly the same row order as boxes. |
 | Training labels | Valid person ID per detection plus a boolean valid/ignored mask; used only in training. |

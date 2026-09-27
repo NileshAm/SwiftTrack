@@ -1,8 +1,8 @@
-# graph.py and model.py — the association core
+# Utils/graph.py and model.py — the association core
 
 [Back to TODO](README.md) · [Shared arrays](02-contracts.md)
 
-## graph.py
+## Utils/graph.py
 
 - **`pairwise_iou(boxes_a, boxes_b)`** returns `[A,B]` overlaps using full xyxy endpoints. Avoid division-by-zero/NaNs for degenerate boxes. Empty inputs return correctly shaped empty arrays.
 - **`build_graph(track_boxes, detection_boxes, track_features, detection_features, image_size)`** creates the node features, edge indices/attributes, candidate pairs, and row mappings in one dictionary. Use it for training frame pairs and inference tracks. Normalize x by image width and y by height. Begin with the documented baseline candidate rule; do not add top-k pruning as an invisible speed change.
