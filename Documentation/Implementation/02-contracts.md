@@ -9,10 +9,10 @@ Spend a short discussion agreeing these values before writing connected function
 | Frame | Dictionary with `frame_id`, image/path, `height`, `width`, `boxes`, and `scores`. |
 | Boxes | `[D,4]` in internal zero-origin `(x1,y1,x2,y2)` pixels. Convert input origin once in `Utils/data.py`, and reverse it during MOT export. |
 | Scores | `[D]`, preserving the supplied detection confidence. |
-| Features | `[D,F]`, exactly the same row order as boxes. |
+| Features | `extract_features` returns `(features, valid_mask)`: CPU tensors `[D,1024]` and boolean `[D]`, in box row order. Filter invalid rows from features, boxes, scores, row IDs, and training labels together before graph construction. |
 | Training labels | Valid person ID per detection plus a boolean valid/ignored mask; used only in training. |
-| Graph | Dictionary with node features `[N,F_node]`, edge indices `[2,E]`, edge attributes `[E,F_edge]`, candidate pairs, and track/detection counts. |
-| Model output | Dictionary containing `logits` `[T,D]`, `mask` `[T,D]`, and track/detection embeddings needed by the loss. |
+| Graph | CPU tensors: `node_features [T+D,F+4]`, `edge_index [2,2K]`, `edge_attr [2K,6]`, `candidate_pairs [K,2]`, `edge_pair_index [2K]`, `candidate_mask [T,D]`, `node_type [T+D]`, plus integer `num_tracks`/`num_detections`. [Exact layout](05-graph-and-model.md#exact-layout). |
+| Model output | Dictionary containing `logits`, `mask`, normalized `scores` `[T,D]`; unit-length track/detection embeddings `[T,H]` / `[D,H]`; unmatched scores `[T]` / `[D]`; augmented `transport [T+1,D+1]`; candidate mapping and `marginal_error`. [Details](05-graph-and-model.md#modelpy). |
 | Track | Dictionary with ID, last box, score, last-seen frame, missed count, and latest feature. |
 
 `T` is the number of tracks, `D` detections, `N=T+D` nodes. Store track nodes first, then detection nodes. A pair `(t,d)` uses graph nodes `t` and `T+d`. If message edges are bidirectional, score each track–detection pair only once. Start with one graph per batch; no graph-collation system is needed.
