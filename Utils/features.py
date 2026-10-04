@@ -16,7 +16,7 @@ from tqdm.auto import tqdm
 
 
 def load_encoder(device=None):
-    """Load the configured frozen encoder (DETR by default).
+    """Load the configured encoder (fine-tunable DETR by default).
 
     Uses config.DEVICE unless device is given (for example, "cpu"). The first
     pretrained run downloads official weights. DETR details are in appearance.py;
@@ -78,7 +78,22 @@ def load_encoder(device=None):
     return encoder
 
 
-@torch.no_grad()
+def extract_feature_batch(images, boxes_per_image, encoder):
+    """Batch DETR images; return per-image features/masks without mixing frames.
+
+    DenseNet retains its existing per-image crop batching. Training callers
+    must combine batch losses before backward because DETR activations are shared.
+    """
+    if len(images) != len(boxes_per_image):
+        raise ValueError("Every image needs a box array")
+    if hasattr(encoder, "extract_batch"):
+        with torch.set_grad_enabled(torch.is_grad_enabled() and encoder.training
+                                    and not config.FREEZE_ENCODER):
+            return encoder.extract_batch(images, boxes_per_image)
+    return [extract_features(image, boxes, encoder, show_progress=False)
+            for image, boxes in zip(images, boxes_per_image)]
+
+
 def extract_features(image, boxes, encoder, batch_size=None, *, show_progress=True):
     """Return (features [D,F], valid_mask [D]) as CPU tensors.
 
@@ -97,7 +112,9 @@ def extract_features(image, boxes, encoder, batch_size=None, *, show_progress=Tr
     Set show_progress=False inside a loop with its own frame progress bar.
     """
     if hasattr(encoder, "extract_boxes"):
-        return encoder.extract_boxes(image, boxes)
+        with torch.set_grad_enabled(torch.is_grad_enabled() and encoder.training
+                                    and not config.FREEZE_ENCODER):
+            return encoder.extract_boxes(image, boxes)
     batch_size = config.CROP_BATCH_SIZE if batch_size is None else batch_size
     if not isinstance(batch_size, int) or batch_size <= 0:
         raise ValueError("batch_size must be a positive integer")
@@ -139,7 +156,8 @@ def extract_features(image, boxes, encoder, batch_size=None, *, show_progress=Tr
                       int(np.ceil(box[2])), int(np.ceil(box[3])))
             crops.append(encoder.preprocess(pil_image.crop(bounds)))
         batch = torch.stack(crops).to(device)
-        encoded = encoder(batch)
+        with torch.no_grad():
+            encoded = encoder(batch)
         if not torch.isfinite(encoded).all():
             raise RuntimeError(f"Nonfinite appearance features for detection rows {rows.tolist()}")
         features[torch.from_numpy(rows)] = encoded.cpu()

@@ -12,7 +12,7 @@ from Utils.data import pairwise_iou
 from Utils import config
 
 
-# For a directed edge, differences and ratios mean destination minus/source.
+# At receiving node i, displacement is position_i - position_j (neighbor j).
 EDGE_FEATURE_NAMES = ("dx", "dy", "distance", "iou", "cosine")
 
 
@@ -33,7 +33,7 @@ def _matrix(values, name, columns=None, *, detach=True):
 
 def build_graph(track_boxes, detection_boxes, track_features, detection_features,
                 image_size, candidate_mask=None):
-    """Build a graph dictionary from two sets of boxes and frozen features.
+    """Build a graph dictionary from two sets of boxes and appearance features.
 
     Boxes: zero-origin xyxy arrays [T,4] and [D,4]. Features: [T,F] and [D,F],
     in the corresponding box order. Pass image_size=(height, width). Filter
@@ -91,7 +91,7 @@ def build_graph(track_boxes, detection_boxes, track_features, detection_features
     if limit is not None:
         if not isinstance(limit, (float, int)) or not 0 < limit < float("inf"):
             raise ValueError("ASSOCIATION_DISTANCE_PX must be positive or None")
-        # Eq. 1 uses top-left positions, not centers; distances are original pixels.
+        # Use top-left positions from Eq. 1; the gate uses original pixels.
         distance = torch.linalg.vector_norm(track_boxes[:, None, :2] - detection_boxes[None, :, :2], dim=2)
         candidate_mask &= distance <= limit
     pairs = candidate_mask.nonzero(as_tuple=False)
@@ -101,7 +101,7 @@ def build_graph(track_boxes, detection_boxes, track_features, detection_features
     forward_edges = torch.stack((source, destination))
     edge_index = torch.cat((forward_edges, forward_edges.flip(0)), dim=1)
 
-    displacement = normalized_boxes[source, :2] - normalized_boxes[destination, :2]
+    displacement = normalized_boxes[destination, :2] - normalized_boxes[source, :2]
     distance = torch.linalg.vector_norm(displacement, dim=1, keepdim=True)
     overlaps = torch.from_numpy(pairwise_iou(track_boxes.numpy(), detection_boxes.numpy()))
     normalized_appearance = F.normalize(appearance, p=2, dim=1, eps=1e-12)

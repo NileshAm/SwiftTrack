@@ -3,6 +3,7 @@
 from pathlib import Path
 from Utils import config
 from Utils.data import _sequence_info
+from Utils.detections import detection_settings
 
 SPLIT_PROTOCOL = "whole_video_v1"
 
@@ -47,6 +48,7 @@ def split_manifest():
         "protocol": SPLIT_PROTOCOL,
         "dataset_root": str(Path(config.DATASET_ROOT).resolve()),
         "dataset_split": config.DATASET_SPLIT,
+        "detections": detection_settings(),
         "sequences": {
             split: {sequence: list(full_frame_range(Path(config.DATASET_ROOT) / config.DATASET_SPLIT / sequence))
                     for sequence in sorted(sequences)}
@@ -58,5 +60,5 @@ def split_manifest():
 def check_checkpoint_split(checkpoint):
     """Prevent temporal-split or differently trained weights being reported as clean validation."""
     if checkpoint.get("data_split") != split_manifest():
-        raise ValueError("Checkpoint uses an old/different video split. Train a fresh RUN_NAME "
-                         "with the current video lists.")
+        raise ValueError("Checkpoint uses an old/different video split or detection source. Train a fresh RUN_NAME "
+                         "with the current video lists and detection settings.")

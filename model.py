@@ -11,7 +11,7 @@ from Utils.relationships import RelationshipNetwork
 from Utils.attention import GraphAttention
 from Utils.sinkhorn import LearnableSinkhorn
 
-MODEL_VERSION = "dragontrack_paper_equations_v3"
+MODEL_VERSION = "dragontrack_fixed_marginals_unit_embeddings_v4"
 
 
 class AssociationModel(nn.Module):
@@ -53,8 +53,8 @@ class AssociationModel(nn.Module):
         similarity = (unit[rows] * unit[t + cols]).sum(1).clamp(-1, 1)
         cosine = embeddings.new_zeros((t, d)).index_put((rows, cols), similarity)
         output = {"logits": cosine, "pair_logits": similarity, "mask": mask,
-                  "candidate_pairs": pairs, "track_embeddings": embeddings[:t],
-                  "detection_embeddings": embeddings[t:], "attention_weights": attention_weights,
+                  "candidate_pairs": pairs, "track_embeddings": unit[:t],
+                  "detection_embeddings": unit[t:], "attention_weights": attention_weights,
                   "relationships": relationships}
         output.update(self.matcher(cosine, mask))
         return output
