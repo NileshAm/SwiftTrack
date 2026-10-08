@@ -12,7 +12,7 @@ VAL_BATCH_SIZE = 4
 DETR_GRADIENT_CHECKPOINTING = False
 ```
 
-These settings are in `Utils/config.py`. Run `python train.py` normally. The progress bar shows the current batch size; a video's final batch may be smaller. A running Python process retains the settings it loaded at startup. Existing results remain protected; choose a fresh `RUN_NAME` if that output folder already contains a checkpoint/history. This change does not add training-resume support.
+These settings are in `Utils/config.py`. Run `python train.py` normally. The progress bar shows the current batch size; a video's final batch may be smaller. A running Python process retains the settings it loaded at startup. Choose a fresh `RUN_NAME` for a new experiment, or use the later [resume support](23-resume-training.md) to continue a compatible run with the same batch settings.
 
 Batch size 2 retains the paper's training batch size. Increasing it changes the number of optimizer updates per epoch and may affect accuracy; it is not just a speed switch. Validation batching does not update weights. Batching does not change checkpoint architecture or tracking's single-frame interface.
 

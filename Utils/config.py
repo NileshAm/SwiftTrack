@@ -1,7 +1,7 @@
 """Settings shared by training, tracking, and evaluation.
 
 From a script in the project root, use: from Utils import config
-Paper-aligned run; see Documentation/Implementation/17-paper-alignment.md.
+Residual appearance run; see Documentation/Implementation/22-appearance-residual.md.
 Train on TRAIN_SEQUENCES; validate/score full videos in VAL_SEQUENCES.
 """
 
@@ -17,7 +17,7 @@ MOT20_ROOT = DATA_ROOT / "MOT20"  # Not present locally yet; unused initially.
 DATASET_ROOT = MOT17_ROOT
 DATASET_SPLIT = "train"  # MOT's labelled folder containing both video lists below.
 
-RUN_NAME = "mot17_fixed_matching"  # Fresh matcher/loss version; preserve all previous runs.
+RUN_NAME = "mot17_appearance_residual_v1"  # Fresh residual model; preserve the tuned v4 checkpoint/results.
 OUTPUT_DIR = PROJECT_ROOT / "outputs" / RUN_NAME
 CHECKPOINT_PATH = OUTPUT_DIR / "model.pt"  # Best validation weights saved by train.py.
 TRACKEVAL_ROOT = None  # None uses installed trackeval; alternatively point to its source checkout.
@@ -39,7 +39,8 @@ DETECTION_FILE = "det/det.txt"  # Only for "supplied"; relative to each sequence
 DETECTION_CACHE_DIR = PROJECT_ROOT / "detections" / "rtdetrv2_s_coco_640_score010"
 DETECTOR_MODEL_NAME = "PekingU/rtdetr_v2_r18vd"  # COCO pretrained RT-DETRv2-S, ResNet18.
 DETECTOR_REVISION = "5650961749fa93567c0d46fc7f43ea4f9e914107"
-DETECTOR_IMAGE_SIZE = 640  # Official square input; original-size boxes are saved.
+DETECTOR_INPUT_MODE = "square"  # "original": keep every pixel, pad bottom/right to a multiple of 32.
+DETECTOR_IMAGE_SIZE = 640  # Only for "square" mode; try 960/1280 in separate caches.
 DETECTOR_MIN_SCORE = 0.10  # Cache floor; tune on validation, not test videos.
 GT_FILE = "gt/gt.txt"  # Training labels/evaluation only, never tracking input.
 DETECTION_SOURCE = "Authors-linked Tracktor-preprocessed MOT17 public detections (SDP variant)"
@@ -69,13 +70,15 @@ DETR_MAX_SIZE = 1333
 
 # PAPER: specified architecture/optimizer; unspecified constants are marked below.
 GRAPH_HIDDEN_DIMS = (512, 128)
-ASSOCIATION_DISTANCE_PX = 200.0  # Paper Sec. 3.7; same original-pixel gate in train and tracking.
+# Both graph layers now preserve own features with a learned residual projection.
+ASSOCIATION_DISTANCE_PX = 25  # Paper Sec. 3.7; same original-pixel gate in train and tracking.
 SINKHORN_ITERATIONS = 50  # Fixed-marginal normalization, then unmatched residual correction.
 SINKHORN_SCORE_SCALE = 5.0  # Released score exponent multiplier; not specified by the paper.
 SINKHORN_UNMATCHED_LOGIT = -1.0  # Initial learned unmatched preference; masses are never learned.
 
 # TRAINING: actual full-image DETR batches, with chronological graph scoring.
-EPOCHS = 20
+EPOCHS = 30  # Total target: resume the epoch-20 residual model through epoch 40.
+RESUME_TRAINING = True  # Continue this run's last completed epoch; empty run starts fresh.
 LEARNING_RATE = 1e-4  # Paper Sec. 4.1, Adam.
 TRAIN_BATCH_SIZE = 2  # Images encoded together; one optimizer step per batch. Paper uses 2.
 VAL_BATCH_SIZE = 4  # Independent image batching, no gradients or optimizer updates.
@@ -88,7 +91,7 @@ HARD_NEGATIVE_FRACTION = 0.5  # Remaining sampled negatives are random; validati
 LOOKBACK_FRAMES = 30  # Maximum observation gap, shared by train/validation/tracking.
 MAX_MISSED_FRAMES = LOOKBACK_FRAMES - 1  # 30-frame gap has 29 intervening missing frames.
 GRAD_CLIP_NORM = 5.0
-SAVE_EVERY_EPOCH = True
+SAVE_EVERY_EPOCH = True  # Legacy setting; last.pt now always saves each epoch for safe resume.
 
 
 # TRACKING: finalize score-based thresholds after defining the association score.
@@ -98,7 +101,7 @@ USE_MOTION_PREDICTION = True  # Shared by training, validation loss, and trackin
 USE_APPEARANCE_HISTORY = True  # Shared confidence-weighted memory of reliable features.
 APPEARANCE_HISTORY_SIZE = 30  # Accepted observations, not elapsed frames.
 APPEARANCE_HISTORY_MIN_SCORE = 0.5  # Lower-score matches keep IDs but do not change memory.
-TRACK_CONFIRM_MIN_HITS = 3  # Released tracker: reject IDs observed fewer than 3 times.
+TRACK_CONFIRM_MIN_HITS = 1  # Released tracker: reject IDs observed fewer than 3 times.
 TRACK_CONFIRM_WINDOW = 15  # Require those observations within 15 frames.
 TRACKING_VARIANT = "paper_motion_history"  # Separate results using the SAME trained checkpoint.
 SAVE_VIDEO = False  # Enable for the demo; leave off when measuring speed.

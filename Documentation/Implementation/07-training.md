@@ -1,5 +1,10 @@
 # train.py — training, validation, and saved weights
 
+**Current continuation behavior:** `RESUME_TRAINING=True` restores the last saved
+epoch; `EPOCHS=40` extends the existing epoch-20 residual run through epoch 40.
+See [resume settings and functions](23-resume-training.md). Historical baseline
+settings below are superseded by the current config and linked newer guides.
+
 `python train.py` still trains on full videos. For a quick search, the optional
 `main(max_train_frames_per_sequence=N)` argument trains on the first N consecutive
 frames of each training video (shorter videos use all frames). Validation stays
@@ -45,7 +50,8 @@ Configuration alone cannot reproduce the published metrics: our system uses supp
 | `TRAIN_FRACTION`, `VAL_FRACTION` | Default `0.8` uses the first 80%; `0.1` uses the next 10%; the remainder is held out for evaluation. |
 | `EPOCHS`, `LEARNING_RATE` | Current candidate: 20 passes, fixed Adam learning rate `3e-5`. Best weights are selected by validation loss. |
 | `DEVICE`, `CROP_BATCH_SIZE` | Default CUDA and 16 crops. Reduce the crop batch to 2 if other programs use GPU memory; use `"cpu"` for small CPU checks. |
-| `SAVE_EVERY_EPOCH` | Save/update `last.pt` after every epoch when true; otherwise save it only after the final epoch. The best checkpoint is always saved when validation improves. |
+| `RESUME_TRAINING`, `EPOCHS` | Resume the current run when enabled; EPOCHS is the total target. See the [resume guide](23-resume-training.md). |
+| `SAVE_EVERY_EPOCH` | Legacy setting: `last.pt` now always saves after each epoch for recovery. The best checkpoint is saved when validation improves. |
 
 The run uses temporal splits of each selected video. For MOT17-02's 600 frames, training uses 1–480 (479 pairs), validation uses 481–540 (59 pairs), and evaluation reserves 541–600. Training never uses the evaluation portion. No pair crosses a split boundary. This holds out later frames from the same scenes/identities, not entirely unseen videos.
 
@@ -82,12 +88,12 @@ Training losses are measured before each optimizer update; validation uses the m
 Inside `outputs/<RUN_NAME>/`:
 
 - **`model.pt`** (or `CHECKPOINT_PATH`): weights from the epoch with the lowest validation total loss.
-- **`last.pt`**: most recent saved epoch, controlled by `SAVE_EVERY_EPOCH`.
+- **`last.pt`**: most recent completed epoch; always saved for recovery.
 - **`history.csv`**: one row per completed epoch with training/validation losses, counts, and elapsed seconds. Open it in a spreadsheet to plot the curves.
 
 Checkpoints include model/optimizer states, constructor settings, epoch, seed, feature weights/preprocessing, the config snapshot including selected sequences/ranges, metrics, and the best epoch/loss so far. Paths are stored as strings. DenseNet weights are referenced by their pinned pretrained version, not duplicated in the checkpoint.
 
-Each launch starts fresh. Existing checkpoint/history files are protected: choose a new `RUN_NAME` before starting another run. There is no automatic resume option; optimizer state is included for a later manual continuation if needed. Graph/model demonstration images do not block training.
+`RESUME_TRAINING=True` continues the current compatible run and backs up existing files first. `EPOCHS` is a total target. Choose a new `RUN_NAME` to start fresh; `RESUME_TRAINING=False` refuses existing run files. See [resume settings and compatibility](23-resume-training.md). Graph/model demonstration images do not block training.
 
 Load the best association model into an existing graph workflow:
 

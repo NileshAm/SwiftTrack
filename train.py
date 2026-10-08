@@ -6,7 +6,6 @@ predictions and appearance history. GT guides state updates after scoring
 (teacher forcing); validation loss is not tracking-accuracy evaluation.
 """
 
-import csv
 from itertools import groupby, islice
 from pathlib import Path
 import random
@@ -27,6 +26,8 @@ from Utils.pairs import build_targets
 from Utils.losses import compute_loss
 from Utils.training_state import TrainingTrackState
 from Utils.track_state import state_settings
+from Utils.training_resume import (load_resume, random_state, restore_random_state,
+                                   save_checkpoint, save_history, backup_run)
 
 
 def load_frame_pairs(sequences, split, *, max_frames=None):
@@ -249,13 +250,14 @@ def validate(model, frame_pairs, encoder, *, overall=None):
 def main(*, max_train_frames_per_sequence=None):
     """Load selected splits, run epochs, log losses, and save best/latest weights.
 
-    Starts a fresh run. Choose a new RUN_NAME if checkpoint/history files exist.
-    model.pt is selected by validation loss; last.pt is the most recent saved
-    epoch. Validation videos never enter optimizer updates. Optional search-only
+    RESUME_TRAINING restores the last completed epoch in the current run.
+    EPOCHS is the TOTAL target, not additional epochs. model.pt is selected by
+    validation loss; last.pt saves every completed epoch for recovery.
+    Validation videos never enter optimizer updates. Optional search-only
     frame cap keeps a consecutive prefix of every training video. Calling main()
     or running python train.py still uses all training frames.
     """
-    if not isinstance(config.EPOCHS, int) or config.EPOCHS <= 0:
+    if isinstance(config.EPOCHS, bool) or not isinstance(config.EPOCHS, int) or config.EPOCHS <= 0:
         raise ValueError("EPOCHS must be a positive integer")
     if not np.isfinite(config.LEARNING_RATE) or config.LEARNING_RATE <= 0:
         raise ValueError("LEARNING_RATE must be finite and positive")
@@ -273,9 +275,22 @@ def main(*, max_train_frames_per_sequence=None):
     history_path = output_dir / "history.csv"
     if best_path.resolve() == last_path.resolve():
         raise ValueError("CHECKPOINT_PATH must differ from outputs/<run_name>/last.pt")
-    for path in (best_path, last_path, history_path):
-        if path.exists():
-            raise FileExistsError(f"{path} exists. Set a new RUN_NAME/output path for a fresh run.")
+    if not isinstance(config.RESUME_TRAINING, bool):
+        raise ValueError("RESUME_TRAINING must be True or False")
+    saved, history, start_epoch = None, [], 1
+    existing = any(path.exists() for path in (best_path, last_path, history_path))
+    if existing:
+        if not config.RESUME_TRAINING:
+            raise FileExistsError("Run files exist. Enable RESUME_TRAINING or choose a fresh RUN_NAME.")
+        saved, history, source = load_resume(last_path, best_path, history_path,
+                                            max_train_frames_per_sequence)
+        start_epoch = saved["epoch"] + 1
+        tqdm.write(f"Resuming {source}: completed epoch {saved['epoch']}; target {config.EPOCHS}.")
+        if start_epoch > config.EPOCHS:
+            tqdm.write("Target already reached. Increase EPOCHS to continue; no files changed.")
+            return history
+    else:
+        tqdm.write("No existing checkpoints: starting a fresh training run.")
 
     random.seed(config.SEED)
     np.random.seed(config.SEED)
@@ -301,18 +316,42 @@ def main(*, max_train_frames_per_sequence=None):
     settings = {name: str(value) if isinstance(value, Path) else value
                 for name, value in vars(config).items() if name.isupper()}
     model_settings = dict(feature_dim=config.FEATURE_DIM, hidden_dims=config.GRAPH_HIDDEN_DIMS)
+    best_loss, best_epoch = float("inf"), 0
+    if saved is not None:
+        if saved["model_settings"] != model_settings or saved["feature_settings"] != encoder.feature_settings:
+            raise ValueError("Resume model/encoder preprocessing differs from this checkpoint")
+        if saved.get("training_frame_ranges") != training_frame_ranges:
+            raise ValueError("Actual training frame ranges differ from the resume checkpoint")
+        model.load_state_dict(saved["model_state_dict"])
+        if not config.FREEZE_ENCODER:
+            if saved.get("encoder_state_dict") is None:
+                raise ValueError("Resume checkpoint is missing the fine-tuned encoder weights")
+            encoder.load_state_dict(saved["encoder_state_dict"])
+        optimizer.load_state_dict(saved["optimizer_state_dict"])
+        # Preserve Adam moments/steps but honor an explicitly changed learning rate.
+        for group in optimizer.param_groups:
+            group["lr"] = config.LEARNING_RATE
+        best_loss, best_epoch = saved["best_val_loss"], saved["best_epoch"]
+        if saved.get("rng_state") is not None:
+            restore_random_state(saved["rng_state"])
+        else:
+            tqdm.write("Legacy checkpoint has no random states; weights/optimizer resume, "
+                       "but continuation is not bit-for-bit reproducible.")
+        folder = backup_run(output_dir, (best_path, last_path, history_path))
+        save_history(history, history_path)
+        tqdm.write(f"Pre-resume backup: {folder}; learning rate={config.LEARNING_RATE:g}; "
+                   f"best validation epoch={best_epoch}.")
+        del saved
     output_dir.mkdir(parents=True, exist_ok=True)
     best_path.parent.mkdir(parents=True, exist_ok=True)
-    best_loss, best_epoch = float("inf"), 0
-    history = []
     tqdm.write(f"Chronological track-state training: maximum observation gap {config.MAX_MISSED_FRAMES + 1}. "
                f"Motion={config.USE_MOTION_PREDICTION}, history={config.USE_APPEARANCE_HISTORY}. "
                "GT guides memory updates after scoring; validation loss is not tracking accuracy.")
     # Count all train AND validation pairs so ETA updates during the first epoch.
-    with tqdm(total=config.EPOCHS * (len(train_pairs) + len(val_pairs)),
+    with tqdm(total=(config.EPOCHS - start_epoch + 1) * (len(train_pairs) + len(val_pairs)),
               desc="Training overall", unit="frame", position=0, smoothing=0,
               dynamic_ncols=True, disable=not config.SHOW_PROGRESS) as overall:
-        for epoch in range(1, config.EPOCHS + 1):
+        for epoch in range(start_epoch, config.EPOCHS + 1):
             tqdm.write(f"\nEpoch {epoch}/{config.EPOCHS}")
             overall.set_postfix(epoch=f"{epoch}/{config.EPOCHS}", phase="train", refresh=False)
             training = train_one_epoch(model, train_pairs, encoder, optimizer, overall=overall)
@@ -347,16 +386,14 @@ def main(*, max_train_frames_per_sequence=None):
                                       "state_settings": recipe},
                 "best_val_loss": best_loss, "best_epoch": best_epoch,
                 "train_metrics": training, "val_metrics": validation,
+                "history": history, "rng_state": random_state(),
             }
             if improved:
-                torch.save(checkpoint, best_path)
+                save_checkpoint(checkpoint, best_path)
                 tqdm.write(f"  Best validation checkpoint saved: {best_path}")
-            if config.SAVE_EVERY_EPOCH or epoch == config.EPOCHS:
-                torch.save(checkpoint, last_path)
-            with history_path.open("w", newline="") as file:
-                writer = csv.DictWriter(file, fieldnames=list(row))
-                writer.writeheader()
-                writer.writerows(history)
+            # Always retain a recovery point, independent of legacy save toggles.
+            save_checkpoint(checkpoint, last_path)
+            save_history(history, history_path)
             if config.SAVE_PLOTS:
                 from Utils.plots import auto_plot
                 auto_plot("training", history_path)
