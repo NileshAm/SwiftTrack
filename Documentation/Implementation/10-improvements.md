@@ -4,7 +4,7 @@
 
 The working tracker, saved model, measured evaluation, comparisons, and demo come first. No extra accuracy algorithm is required for the minimal delivery.
 
-If time remains, choose one small change based on an observed validation failure: for example, confidence-weighted appearance history or a low-confidence second matching pass. Add it inside the existing `track.py`, controlled by one setting in `Utils/config.py`. Do not create a new improvements package or ablation runner.
+If time remains, choose one small change based on an observed validation failure: for example, confidence-weighted appearance history or a low-confidence second matching pass. Add it inside the existing `tracking.py`, controlled by one setting in `Utils/config.py`. Do not create a new improvements package or ablation runner.
 
 Run the same checkpoint, detections, and held-out frames with the setting off and on. Record accuracy/speed and whether retraining was needed in `results.md`. A worse or inconclusive result is still worth reporting. Restoring real scores, repairing geometry, and reconnecting missing losses are fixes, not new algorithms.
 

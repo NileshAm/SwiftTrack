@@ -91,7 +91,9 @@ def plot_graph_demo(images, boxes, graph, frame_ids, focus_track=0):
     ax = axes[1, 1]
     if t and d:
         similarity = np.full((t, d), np.nan)
-        similarity[pairs[:, 0], pairs[:, 1]] = graph["edge_attr"][:len(pairs), 5].numpy()
+        from Utils.graph import EDGE_FEATURE_NAMES
+        column = EDGE_FEATURE_NAMES.index("cosine")
+        similarity[pairs[:, 0], pairs[:, 1]] = graph["edge_attr"][:len(pairs), column].detach().numpy()
         heatmap = ax.imshow(similarity, vmin=-1, vmax=1, cmap="viridis", aspect="auto")
         ax.set_xticks(range(d), [f"D{i}" for i in range(d)], rotation=45)
         ax.set_yticks(range(t), [f"T{i}" for i in range(t)])
