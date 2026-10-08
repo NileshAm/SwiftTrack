@@ -1,7 +1,8 @@
-"""Paper-equation graph attention, cosine association, and learnable Sinkhorn.
+"""Residual graph attention, cosine association, and learnable Sinkhorn.
 
-See Documentation/Implementation/17-paper-alignment.md for explicit defaults
-and remaining unspecified details. Earlier model checkpoints are incompatible.
+See Documentation/Implementation/22-appearance-residual.md for the self-feature
+extension. Earlier model checkpoints require fresh training; do not load them
+with strict=False and leave the new residual weights random.
 """
 import torch
 from torch import nn
@@ -11,7 +12,7 @@ from Utils.relationships import RelationshipNetwork
 from Utils.attention import GraphAttention
 from Utils.sinkhorn import LearnableSinkhorn
 
-MODEL_VERSION = "dragontrack_fixed_marginals_unit_embeddings_v4"
+MODEL_VERSION = "dragontrack_projected_self_residual_v5"
 
 
 class AssociationModel(nn.Module):

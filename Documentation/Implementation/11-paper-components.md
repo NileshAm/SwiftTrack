@@ -1,5 +1,7 @@
 # DETR appearance, attention, matching, and test videos
 
+> **Current settings and architecture:** see [paper alignment](17-paper-alignment.md). The notes below describe earlier development stages; frozen-encoder defaults, previous loss/scoring layers, and old run names are superseded. `main.py` now plots saved run metrics.
+
 > **Current training:** [chronological motion/history state](16-state-training.md) supersedes the historical frame-pair protocol below. Use the fresh `mot17_SDP_state30` run.
 
 This replaces the DenseNet/mean-message baseline. Use a new run: `RUN_NAME="mot17_SDP_video_split"`. Old architecture and percentage-split checkpoints cannot be used for this run; old output folders are preserved. Run in the existing `dragon-track` Conda environment.
