@@ -1,11 +1,13 @@
 # DragonTrack: practical four-day implementation plan
 
+**Current update:** the requested paper components are now integrated. See the [current paper-alignment guide and completion checklist](Implementation/17-paper-alignment.md). The four-day baseline plan below is retained as development history.
+
 **Updated:** 27 September 2026  
 **Team:** two developers with AI assistance  
 **Environment:** use the existing Conda environment  
 **Hardware:** RTX 4060 Laptop GPU, 8 GB VRAM  
 **Data:** MOT17 and MOT20 with supplied detection boxes  
-**Status:** `Utils/config.py` created; tracking/training code and measured results are still pending.
+**Status:** helpers in `Utils/` and the association network/losses in `model.py` are implemented and checked; dataset training, tracking/evaluation runners, and measured benchmark results remain pending.
 
 Use the [TODO checklist](Implementation/README.md) to track work. This revised plan replaces the earlier, more elaborate project structure.
 
@@ -19,7 +21,7 @@ Keep implementation to eight ordinary Python files: four shared helper files in 
 
 ## 2. Minimal files to implement
 
-`Utils/config.py` exists; the remaining files are proposed work. Reuse suitable upstream code and preserve its attribution instead of rewriting everything. If working upstream files are adopted under different names, update the checklist accordingly; do not maintain duplicate versions.
+The four helpers in `Utils/` and `model.py` exist; training, tracking, and evaluation runners remain proposed work. Reuse suitable upstream code and preserve its attribution instead of rewriting everything. If working upstream files are adopted under different names, update the checklist accordingly; do not maintain duplicate versions.
 
 | File | Main work | Guide |
 | --- | --- | --- |
@@ -29,7 +31,7 @@ Keep implementation to eight ordinary Python files: four shared helper files in 
 | `Utils/graph.py` | Correct box geometry, candidate pairs, node/edge tensors. | [Graph/model](Implementation/05-graph-and-model.md) |
 | `model.py` | Graph association network, scores, Sinkhorn, and training losses together. | [Graph/model](Implementation/05-graph-and-model.md) |
 | `train.py` | Small training/validation loop and model saving. | [Training](Implementation/07-training.md) |
-| `track.py` | Assignment, track IDs/history, MOT output, optional video, and simple timing. | [Tracking](Implementation/06-assignment-and-tracker.md) |
+| `tracking.py` | Assignment, track IDs/history, MOT output, optional video, and simple timing. | [Tracking](Implementation/06-assignment-and-tracker.md) |
 | `evaluate.py` | Thin wrapper around TrackEval and a short metric summary. | [Evaluation](Implementation/08-evaluation.md) |
 
 Use `outputs/<run_name>/` for the model, tracking files, evaluator output, and video. Write settings actually used, commands, selected frames, and findings in one `results.md` there. A copied `Utils/config.py` or the settings saved inside the checkpoint is enough for the first version. Keep datasets and large output files out of source commits.
@@ -65,7 +67,7 @@ Keep a few lines in `results.md` describing the chosen graph, normalization, and
 
 The paper uses transformer features, graph attention, learnable Sinkhorn, and combined losses. The earlier source inspection found DenseNet, an active GCN path, ordinary Sinkhorn use, and incomplete loss wiring. Fix the working path first. Verify equations before calling any replacement paper-aligned; a library attention layer alone does not establish reproduction.
 
-Use `repo_repaired` only if the repaired architecture is retained. If the graph or other method changes, call the result `partial_reproduction` and explain it. Frozen cached features also change the training protocol. If transformer-to-box mapping or another paper detail remains unclear by Day 2, keep it in the limitations and proceed with training/evaluation.
+The implemented graph currently uses all track–detection pairs, bidirectional messages, and six explicit geometry/appearance attributes. The association model now uses edge-aware mean message passing, a fixed-score unmatched Sinkhorn formulation, and balanced raw-logit BCE plus margin contrastive loss. These development choices have not been verified against the paper, so the current method should be labelled `partial_reproduction`. Use `repo_repaired` only if the repaired architecture is retained. If the graph or other method changes, call the result `partial_reproduction` and explain it. Frozen cached features also change the training protocol. If transformer-to-box mapping or another paper detail remains unclear by Day 2, keep it in the limitations and proceed with training/evaluation.
 
 The paper reference settings are 20 epochs, batch size 2, and Adam at `1e-4`; these are context from the earlier plan, not a four-day training promise. Measure time per epoch and choose an affordable run. A shorter run must state its actual training duration.
 
@@ -95,11 +97,11 @@ Fix failures before longer runs. A file existing or a script starting is not the
 
 ## 8. Data and evaluation essentials
 
-Keep train, validation, and final evaluation sequences separate where possible. Put all MOT17 detector variants of the same video in the same split. For temporal splits, keep training pairs/history inside their partition. Store chosen sequences/ranges in `Utils/config.py`; a separate manifest system is unnecessary.
+Use the requested temporal protocol on shared `SEQUENCES`: first `TRAIN_FRACTION=0.8`, next `VAL_FRACTION=0.1`, remainder for final evaluation. Keep training pairs/history inside their partition. These are later frames from the same scenes, not unseen-video splits. Store percentages in `Utils/config.py`; checkpoints record resolved ranges without a separate manifest system.
 
 For noisy detections, match them one-to-one to valid GT boxes with a stated IoU threshold during training. Same valid identity means a positive pair; different valid identities mean a negative pair. Mask ignored/unmatched examples rather than inventing identities. GT identities must never enter inference decisions.
 
-Use TrackEval for HOTA, IDF1, MOTA, and identity switches. Use its MOT preprocessing; do not write metric formulas. Prefer whole short held-out sequences for easy evaluation. If evaluating a frame range, align GT and tracking frames carefully. Report MOT17 and MOT20 separately using evaluator aggregation. Label subsets and never invent scores for unlabelled benchmark test data.
+Use TrackEval for HOTA, IDF1, MOTA, and identity switches, with its MOT preprocessing. The current protocol uses the same selected videos: first `TRAIN_FRACTION` (0.8), next `VAL_FRACTION` (0.1), then the remaining evaluation frames. `evaluate.py` copies only the selected GT/prediction rows and rebases both to frame 1 without changing source data. Report MOT17 and MOT20 separately using evaluator aggregation. Label these temporal subsets and never invent scores for unlabelled benchmark test data.
 
 Attempt ByteTrack and BoT-SORT using existing implementations with the same boxes, scores, and frames. Start setup on Day 2; do not write a general baseline framework. If a comparison cannot run in time, record the blocker. Trackers with their own detector belong in a separately labelled comparison.
 
