@@ -2,7 +2,7 @@
 
 > **Current settings and architecture:** see [paper alignment](17-paper-alignment.md). The notes below describe earlier development stages; frozen-encoder defaults, previous loss/scoring layers, and old run names are superseded. `main.py` now plots saved run metrics.
 
-**Current default:** `DETECTION_BACKEND="supplied"` uses original SDP boxes and `detect.py` skips inference. This guide describes the optional RT-DETR backend; switch explicitly to `"rtdetrv2"` and use a fresh run to use it again.
+**Current default:** `DETECTION_BACKEND="tracktor"` uses imported preprocessed boxes. Use `detect.py --backend rtdetrv2` to generate a separate experiment without editing the training source. See [detector evaluation and original-resolution inference](24-detector-evaluation.md) for commands, metrics, and tuning guidance.
 
 `detect.py` runs the COCO-pretrained [PekingU/rtdetr_v2_r18vd checkpoint](https://huggingface.co/PekingU/rtdetr_v2_r18vd), the ResNet18 small RT-DETRv2 model. The existing Transformers 4.49.0 installation supports it; PyTorch does not need upgrading. The model revision is pinned in config. First use downloads weights into Hugging Face's normal cache; later use reuses them.
 
@@ -28,6 +28,7 @@ To process only one group, use `python detect.py --split train`, `--split val`, 
 | `DETECTION_CACHE_DIR` | `detections/rtdetrv2_s_coco_640_score010` under the project. Separate from original data and training outputs. |
 | `DETECTOR_MODEL_NAME`, `DETECTOR_REVISION` | Fixed COCO-pretrained model and exact weight revision. |
 | `DETECTOR_IMAGE_SIZE` | 640×640 input, using the checkpoint's image processor. Boxes are mapped back to the original image size. |
+| `DETECTOR_INPUT_MODE` | `"square"` uses the size above. `"original"` disables resizing and pads to a multiple of 32; use a separate cache. |
 | `DETECTOR_MIN_SCORE` | 0.10 cache floor; keeps lower-confidence boxes for association. A starting value, not a validated optimum. |
 | `DETECTION_MIN_SCORE` | Optional extra filtering when reading the cache. Cannot recover detections discarded during caching. |
 | `NEW_TRACK_MIN_SCORE` | Still 0.5; unmatched detections below this cannot start new tracks. Tune on validation. |

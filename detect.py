@@ -22,12 +22,13 @@ from Utils.splits import validate_video_splits, video_key
 
 
 class PersonDetector:
-    """Frozen RT-DETRv2-S, RGB square resize, original-size xyxy person boxes."""
+    """Frozen RT-DETRv2, square resize or unscaled padded RGB input."""
 
     def __init__(self):
         from transformers import RTDetrImageProcessor, RTDetrV2ForObjectDetection
 
         detector_settings()
+        self.input_mode = config.DETECTOR_INPUT_MODE
         self.device = torch.device(config.DEVICE)
         if self.device.type == "cuda" and not torch.cuda.is_available():
             raise RuntimeError("CUDA is unavailable. Fix GPU access or set DEVICE='cpu' for a small check.")
@@ -37,6 +38,11 @@ class PersonDetector:
         self.model = RTDetrV2ForObjectDetection.from_pretrained(
             config.DETECTOR_MODEL_NAME, revision=config.DETECTOR_REVISION,
             use_pretrained_backbone=False).eval().requires_grad_(False).to(self.device)
+        # Fixed 640 anchors cannot be reused for rectangular/full-size inputs.
+        if self.input_mode == "original" or config.DETECTOR_IMAGE_SIZE != 640:
+            self.model.config.anchor_image_size = None
+            self.model.model.config.anchor_image_size = None
+            self.model.model.encoder.eval_size = None
         # Resolve by name: COCO class indices differ between model implementations.
         person_ids = [int(key) for key, value in self.model.config.id2label.items() if value.lower() == "person"]
         if len(person_ids) != 1:
@@ -49,10 +55,18 @@ class PersonDetector:
     def predict(self, image):
         """Return clipped [N,4] xyxy boxes and [N] scores; no IDs or GT."""
         height, width = image.shape[:2]
-        inputs = self.processor(images=image, return_tensors="pt").to(self.device)
+        if self.input_mode == "original":
+            # No resize or stretch. Padding aligns the three feature pyramid levels.
+            input_height, input_width = ((height + 31) // 32 * 32, (width + 31) // 32 * 32)
+            padded = np.pad(image, ((0, input_height-height), (0, input_width-width), (0, 0)))
+            inputs = self.processor(images=padded, do_resize=False, do_pad=False,
+                                    return_tensors="pt").to(self.device)
+        else:
+            input_height, input_width = height, width
+            inputs = self.processor(images=image, return_tensors="pt").to(self.device)
         outputs = self.model(**inputs)
         result = self.processor.post_process_object_detection(
-            outputs, target_sizes=torch.tensor([[height, width]], device=self.device),
+            outputs, target_sizes=torch.tensor([[input_height, input_width]], device=self.device),
             threshold=config.DETECTOR_MIN_SCORE, use_focal_loss=self.model.config.use_focal_loss)[0]
         selected = result["labels"] == self.person_id
         boxes = result["boxes"][selected].cpu().numpy()
@@ -126,7 +140,19 @@ def run_sequence(sequence_path, detector, *, overall=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--split", choices=("all", "train", "val", "test"), default="all")
+    parser.add_argument("--backend", choices=("supplied", "tracktor", "rtdetrv2"),
+                        help="Override for this process only; leaves config.py unchanged")
+    parser.add_argument("--input-mode", choices=("square", "original"))
+    parser.add_argument("--image-size", type=int, help="Square input only, multiple of 32")
+    parser.add_argument("--min-score", type=float, help="Cache confidence floor")
+    parser.add_argument("--cache-dir", type=Path, help="Use a separate directory for each detector recipe")
     args = parser.parse_args()
+    for argument, setting in (("backend", "DETECTION_BACKEND"), ("input_mode", "DETECTOR_INPUT_MODE"),
+                              ("image_size", "DETECTOR_IMAGE_SIZE"), ("min_score", "DETECTOR_MIN_SCORE"),
+                              ("cache_dir", "DETECTION_CACHE_DIR")):
+        value = getattr(args, argument)
+        if value is not None:
+            setattr(config, setting, value)
     validate_video_splits()
     if config.DETECTION_BACKEND in ("supplied", "tracktor"):
         tqdm.write("Using supplied/imported detections; detector inference is skipped.")

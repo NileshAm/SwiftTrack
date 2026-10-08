@@ -12,15 +12,25 @@ def detector_settings():
     """Recipe for cache compatibility; device is not part of the recipe."""
     if not 0 <= config.DETECTOR_MIN_SCORE <= 1:
         raise ValueError("DETECTOR_MIN_SCORE must be between 0 and 1")
+    mode = config.DETECTOR_INPUT_MODE
+    if mode not in ("square", "original"):
+        raise ValueError("DETECTOR_INPUT_MODE must be square or original")
     if (not isinstance(config.DETECTOR_IMAGE_SIZE, int) or config.DETECTOR_IMAGE_SIZE < 32
             or config.DETECTOR_IMAGE_SIZE % 32):
         raise ValueError("DETECTOR_IMAGE_SIZE must be a positive multiple of 32")
     if config.BOX_ORIGIN != 1:
         raise ValueError("Cached RT-DETRv2 detections use MOT's BOX_ORIGIN=1")
-    return {"format": "mot_person_v1", "model": config.DETECTOR_MODEL_NAME,
+    recipe = {"format": "mot_person_v1", "model": config.DETECTOR_MODEL_NAME,
             "revision": config.DETECTOR_REVISION, "image_size": config.DETECTOR_IMAGE_SIZE,
             "min_score": config.DETECTOR_MIN_SCORE, "class": "person", "box_origin": 1,
             "precision": "float32_tf32_disabled", "postprocessing": "official_topk_no_nms_clip"}
+    # Keep the existing square recipe identical so old caches remain usable.
+    if mode == "original":
+        recipe.update(image_size=None, input_mode="original", padding="bottom_right_zero_multiple_32",
+                      anchors="dynamic", position_embeddings="dynamic")
+    elif config.DETECTOR_IMAGE_SIZE != 640:
+        recipe.update(anchors="dynamic", position_embeddings="dynamic")
+    return recipe
 
 
 def detection_settings():
