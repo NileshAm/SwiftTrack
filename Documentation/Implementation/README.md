@@ -117,6 +117,13 @@ Write a developer/agent name next to **Owner**, add a brief note only if useful,
 
 ## Detector coverage experiment
 
+- [x] Add separate DDQ inference, MOT cache export and shared detector evaluation/comparison entry points. [How](27-ddq.md)
+- [ ] Compare DDQ and RT-DETR on full validation; assess recall at similar precision, F1 and small/occluded people before selecting a detector.
+
+- [x] Add `detector-search.py` and `Utils/detector_selection.py`: report-only threshold ranking, isolated/resumable training grids, and checkpoint selection across thresholds with precision/recall floors. [How](26-detector-search.md)
+- [ ] Run the small LR grid, validate the winner, then compare a larger detector if coverage remains insufficient.
+- [x] Add `detector-train.py` and `Utils/detector_training.py`: MOT detector fine-tuning, ignored-region loss handling, held-out validation, baseline/best/latest checkpoints, resume, plots and local-weight inference integration. [How](25-detector-training.md)
+- [ ] Run full detector fine-tuning and compare the selected export against Tracktor before retraining association.
 - [x] Add `evaluate_detector.py` for cached-box confidence sweeps, per-video precision/recall/F1, missed/duplicate counts and size/visibility recall.
 - [x] Add `detect.PersonDetector.predict` original-resolution input with padding and dynamic anchors; keep caches separate and validate compatibility.
 - [ ] Compare full validation at 640, 960 and original resolution; select a useful precision–recall tradeoff, then regenerate training boxes and train a fresh run. [Commands and implementation details](24-detector-evaluation.md)

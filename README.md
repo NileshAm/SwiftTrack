@@ -133,6 +133,39 @@ and pads the edges; it costs more memory than 640x640. See the
 [detector guide](Documentation/Implementation/24-detector-evaluation.md) for comparisons,
 parameter ranges, metric definitions and how to train on the winning cache.
 
+## Fine-tune the detector
+
+Run `python detector-train.py` to fine-tune RT-DETRv2 using the configured training
+videos and validate on the held-out videos each epoch. Separate `DETECTOR_TRAIN_*`
+settings control this run. It saves the best validation-F1 detector, latest resume
+checkpoint, metric reports and curves. The pretrained model is evaluated as epoch
+zero, so fine-tuning must beat that baseline to replace the best weights.
+
+Resume by running the command again; use `--epochs 20` to extend the total target.
+This does not switch the existing association model's detection source.
+See [detector training](Documentation/Implementation/25-detector-training.md) for
+settings, ignored-label handling and commands to export detections with the trained model.
+
+## Detector parameter search
+
+`python detector-search.py --mode reports` ranks existing detector epoch/threshold
+reports without training. `python detector-search.py --mode train` runs three short
+learning-rate trials with a confidence sweep and minimum precision/recall goals.
+Edit the grid and independent epoch budget in `detector-search.py`; config.py is
+not modified. Completed trials are skipped and interrupted trials resume.
+See the [detector search guide](Documentation/Implementation/26-detector-search.md)
+for current findings, checkpoint selection and larger-model comparisons.
+
+## Compare DDQ-DETR with RT-DETR
+
+In the same `dragon-track` environment, `python detect-ddq.py --split val` exports
+five-scale DDQ person detections separately. Use `--variant 4scale` for the earlier
+detector. `python detect-ddq.py --smoke-test` checks one
+frame first. Use `evaluate_detector.py --backend ddq --cache-dir <ddq-cache>` for
+the same metrics as RT-DETR, then `compare-detectors.py --reports <rt-summary.json>
+<ddq-summary.json>` to compare recall and F1. No active detector settings are changed.
+See [DDQ setup and comparison commands](Documentation/Implementation/27-ddq.md).
+
 # Acknowledgement
 
 This project builds upon the **DragonTrack** framework introduced in the paper:

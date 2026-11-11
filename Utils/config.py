@@ -42,6 +42,20 @@ DETECTOR_REVISION = "5650961749fa93567c0d46fc7f43ea4f9e914107"
 DETECTOR_INPUT_MODE = "square"  # "original": keep every pixel, pad bottom/right to a multiple of 32.
 DETECTOR_IMAGE_SIZE = 640  # Only for "square" mode; try 960/1280 in separate caches.
 DETECTOR_MIN_SCORE = 0.10  # Cache floor; tune on validation, not test videos.
+DETECTOR_WEIGHTS_DIR = None  # Fine-tuned Hugging Face export folder; None uses the pinned COCO weights.
+
+# DETECTOR FINE-TUNING: independent of association training and its checkpoints.
+DETECTOR_TRAIN_OUTPUT_DIR = PROJECT_ROOT / "outputs" / "detector_rtdetrv2_s_mot17_v1(batch1)"
+DETECTOR_TRAIN_EPOCHS = 10  # Total target; detector-train.py resumes completed epochs automatically.
+DETECTOR_TRAIN_IMAGE_SIZE = 640  # Start at the pretrained scale; 960 is an optional separate run.
+DETECTOR_TRAIN_BATCH_SIZE = 1  # Conservative for the 8 GB GPU.
+DETECTOR_TRAIN_ACCUMULATION = 4  # Effective batch = batch size * accumulation.
+DETECTOR_TRAIN_LR = 5e-5
+DETECTOR_TRAIN_BACKBONE_LR = 5e-6
+DETECTOR_TRAIN_WEIGHT_DECAY = 1e-4
+DETECTOR_TRAIN_FRAME_STRIDE = 1  # 1 uses all training frames; validation always uses all frames.
+DETECTOR_TRAIN_SCORE = 0.4  # Fixed validation F1 threshold used to select best weights.
+DETECTOR_TRAIN_IGNORE_IOU = 0.5  # Unmatched predictions overlapping ignored GT do not become negatives.
 GT_FILE = "gt/gt.txt"  # Training labels/evaluation only, never tracking input.
 DETECTION_SOURCE = "Authors-linked Tracktor-preprocessed MOT17 public detections (SDP variant)"
 BOX_FORMAT = "xywh"  # Input: left, top, width, height.

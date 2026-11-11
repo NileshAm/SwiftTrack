@@ -30,6 +30,17 @@ def detector_settings():
                       anchors="dynamic", position_embeddings="dynamic")
     elif config.DETECTOR_IMAGE_SIZE != 640:
         recipe.update(anchors="dynamic", position_embeddings="dynamic")
+    if config.DETECTOR_WEIGHTS_DIR is not None:
+        folder = Path(config.DETECTOR_WEIGHTS_DIR).resolve()
+        manifest = json.loads((folder / "training_manifest.json").read_text())
+        expected = {"config.json", "preprocessor_config.json", "model.safetensors"}
+        if set(manifest.get("files", {})) != expected:
+            raise ValueError("Incomplete fine-tuned detector export; rerun detector-train.py to finish export")
+        for name, digest in manifest["files"].items():
+            if file_digest(folder / name) != digest:
+                raise ValueError(f"Changed/incomplete fine-tuned detector export: {folder / name}")
+        recipe.update(model=str(folder), revision=None, finetuned_files=manifest["files"],
+                      training_manifest_sha256=file_digest(folder / "training_manifest.json"))
     return recipe
 
 

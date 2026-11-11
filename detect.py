@@ -1,6 +1,6 @@
 """Cache RT-DETRv2-S person boxes: python detect.py [--split all|train|val|test].
 
-This is pretrained inference, not detector fine-tuning. No ground truth or
+This is detector inference, not detector fine-tuning. No ground truth or
 supplied detections are read. Training/tracking later read the saved MOT files.
 """
 
@@ -27,16 +27,16 @@ class PersonDetector:
     def __init__(self):
         from transformers import RTDetrImageProcessor, RTDetrV2ForObjectDetection
 
-        detector_settings()
+        settings = detector_settings()
         self.input_mode = config.DETECTOR_INPUT_MODE
         self.device = torch.device(config.DEVICE)
         if self.device.type == "cuda" and not torch.cuda.is_available():
             raise RuntimeError("CUDA is unavailable. Fix GPU access or set DEVICE='cpu' for a small check.")
         self.processor = RTDetrImageProcessor.from_pretrained(
-            config.DETECTOR_MODEL_NAME, revision=config.DETECTOR_REVISION,
+            settings["model"], revision=settings["revision"],
             size={"height": config.DETECTOR_IMAGE_SIZE, "width": config.DETECTOR_IMAGE_SIZE})
         self.model = RTDetrV2ForObjectDetection.from_pretrained(
-            config.DETECTOR_MODEL_NAME, revision=config.DETECTOR_REVISION,
+            settings["model"], revision=settings["revision"],
             use_pretrained_backbone=False).eval().requires_grad_(False).to(self.device)
         # Fixed 640 anchors cannot be reused for rectangular/full-size inputs.
         if self.input_mode == "original" or config.DETECTOR_IMAGE_SIZE != 640:
@@ -146,10 +146,11 @@ def main():
     parser.add_argument("--image-size", type=int, help="Square input only, multiple of 32")
     parser.add_argument("--min-score", type=float, help="Cache confidence floor")
     parser.add_argument("--cache-dir", type=Path, help="Use a separate directory for each detector recipe")
+    parser.add_argument("--weights-dir", type=Path, help="Fine-tuned detector export, e.g. outputs/detector_rtdetrv2_s_mot17_v1/best")
     args = parser.parse_args()
     for argument, setting in (("backend", "DETECTION_BACKEND"), ("input_mode", "DETECTOR_INPUT_MODE"),
                               ("image_size", "DETECTOR_IMAGE_SIZE"), ("min_score", "DETECTOR_MIN_SCORE"),
-                              ("cache_dir", "DETECTION_CACHE_DIR")):
+                              ("cache_dir", "DETECTION_CACHE_DIR"), ("weights_dir", "DETECTOR_WEIGHTS_DIR")):
         value = getattr(args, argument)
         if value is not None:
             setattr(config, setting, value)
@@ -188,7 +189,7 @@ def main():
     if not jobs:
         tqdm.write("No pending videos. All selected caches are complete (or no videos were selected).")
         return
-    tqdm.write(f"Loading {config.DETECTOR_MODEL_NAME} on {config.DEVICE}; {len(jobs)} videos pending.")
+    tqdm.write(f"Loading {detector_settings()['model']} on {config.DEVICE}; {len(jobs)} videos pending.")
     detector = PersonDetector()
     with tqdm(total=sum(count for _, _, count in jobs), desc="Detection overall", unit="frame",
               position=0, smoothing=0, dynamic_ncols=True, disable=not config.SHOW_PROGRESS) as overall:

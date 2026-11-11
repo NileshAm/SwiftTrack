@@ -113,7 +113,7 @@ rather than tuning them to raise the reported score.
 If resolution/threshold changes do not improve the precision–recall tradeoff,
 consider MOT detector fine-tuning on **training videos only** (optionally external
 person data with no validation overlap). That needs a separate detector training
-implementation; `train.py` trains the association model/its configured appearance
+implementation, now available as [detector-train.py](25-detector-training.md); `train.py` trains the association model/its configured appearance
 encoder, not RT-DETR box prediction. Larger model weights must also have a matching
 `DETECTOR_MODEL_NAME` and pinned `DETECTOR_REVISION`.
 

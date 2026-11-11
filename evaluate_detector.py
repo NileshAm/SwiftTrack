@@ -29,16 +29,16 @@ def resolve_source(sequence_path, backend):
     """Verify a saved cache using its own recipe, so old/new resolutions can be compared.
 
     Supplied files have no completion manifest; assume they cover seqinfo's full video.
-    RT-DETR manifests must prove coverage and integrity, but need not match the active
+    RT-DETR/DDQ manifests must prove coverage and integrity, but need not match the active
     training config. Record their exact recipe and hash in this evaluation's report.
     """
     info = _sequence_info(sequence_path)
     if backend == "tracktor":
         path = validate_tracktor(sequence_path)
         metadata = json.loads(path.with_name("summary.json").read_text())
-    elif backend == "rtdetrv2":
+    elif backend in ("rtdetrv2", "ddq"):
         if config.BOX_ORIGIN != 1:
-            raise ValueError("RT-DETR caches use MOT's BOX_ORIGIN=1")
+            raise ValueError("Generated detector caches use MOT's BOX_ORIGIN=1")
         path = cache_path(sequence_path).resolve()
         metadata = json.loads(path.with_name("summary.json").read_text())
         identity = metadata.get("identity", {})
@@ -47,6 +47,8 @@ def resolve_source(sequence_path, backend):
         recipe = identity.get("detector", {})
         if (metadata.get("complete") is not True or any(identity.get(k) != v for k, v in expected.items())
                 or recipe.get("format") != "mot_person_v1" or recipe.get("box_origin") != 1
+                or (backend == "ddq" and recipe.get("backend") != "ddq")
+                or (backend == "rtdetrv2" and recipe.get("backend", "rtdetrv2") != "rtdetrv2")
                 or metadata.get("sha256") != file_digest(path)):
             raise ValueError(f"Incomplete, changed, or incompatible detection cache: {path}")
     else:
@@ -155,8 +157,8 @@ def write_reports(output_dir, rows, provenance, args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--backend", choices=("supplied", "tracktor", "rtdetrv2"), default=config.DETECTION_BACKEND)
-    parser.add_argument("--cache-dir", type=Path, help="RT-DETR cache directory; reads its recorded recipe")
+    parser.add_argument("--backend", choices=("supplied", "tracktor", "rtdetrv2", "ddq"), default=config.DETECTION_BACKEND)
+    parser.add_argument("--cache-dir", type=Path, help="RT-DETR or DDQ cache directory; reads its recorded recipe")
     parser.add_argument("--split", choices=("train", "val"), default="val", help="Use val when tuning")
     parser.add_argument("--scores", type=float, nargs="+", default=[0.1, 0.2, 0.3, 0.5, 0.7],
                         help="Explicit confidence sweep; all cached boxes are always also evaluated")
@@ -169,9 +171,11 @@ def main():
     if args.max_frames is not None and args.max_frames < 1:
         parser.error("--max-frames must be positive")
     if args.cache_dir is not None:
-        if args.backend != "rtdetrv2":
-            parser.error("--cache-dir is for --backend rtdetrv2")
+        if args.backend not in ("rtdetrv2", "ddq"):
+            parser.error("--cache-dir is for --backend rtdetrv2 or ddq")
         config.DETECTION_CACHE_DIR = args.cache_dir
+    if args.backend == "ddq" and args.cache_dir is None:
+        parser.error("--backend ddq requires its explicit --cache-dir")
     args.scores, args.ious = sorted(set(args.scores)), sorted(set(args.ious))
     validate_video_splits()
     sequences = config.VAL_SEQUENCES if args.split == "val" else config.TRAIN_SEQUENCES
