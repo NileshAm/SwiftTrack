@@ -224,4 +224,5 @@ detections/
 
 # Generated runs and local editor preferences
 /outputs/
+/weights/
 /.vscode/

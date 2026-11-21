@@ -25,8 +25,11 @@ def load_encoder(device=None):
     if config.ENCODER_NAME == "detr_resnet50":
         from Utils.appearance import DETRAppearance
         return DETRAppearance(config.DEVICE if device is None else device)
+    if config.ENCODER_NAME == "osnet_reid":
+        from Utils.reid import load_reid_encoder
+        return load_reid_encoder(config.DEVICE if device is None else device)
     if config.ENCODER_NAME != "densenet121":
-        raise ValueError("ENCODER_NAME must be detr_resnet50 or densenet121")
+        raise ValueError("ENCODER_NAME must be detr_resnet50, densenet121, or osnet_reid")
     if not config.FREEZE_ENCODER:
         raise ValueError("This extractor is frozen; fine-tuning is not implemented")
     device = torch.device(config.DEVICE if device is None else device)

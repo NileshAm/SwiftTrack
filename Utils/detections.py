@@ -76,8 +76,12 @@ def cache_identity(sequence_path):
 
 
 def file_digest(path):
+    # hashlib.file_digest was added in Python 3.11; support the project's 3.10 env.
+    digest = hashlib.sha256()
     with Path(path).open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def validate_cache(sequence_path):

@@ -1,6 +1,24 @@
 # SwiftTrack
 An extension of DragonTrack, a transformer-enhanced graph-based multi-person tracking framework. This project builds upon the original DragonTrack implementation with the goal of investigating, developing, and evaluating further improvements to the tracking framework.
 
+## Appearance encoder comparison
+
+DenseNet121, DETR, and frozen MSMT17-pretrained OSNet ReID can be compared with
+separate association training runs and shared detections/splits:
+
+```bash
+python encoder_experiment.py --encoder reid --stage smoke
+python encoder_experiment.py --encoder densenet --stage all --epochs 30
+python encoder_experiment.py --encoder detr --stage all --epochs 30
+python encoder_experiment.py --encoder reid --stage all --epochs 30
+```
+
+The launcher overrides settings in memory and writes separate
+`outputs/encoder_comparison_<name>_v1` folders. ReID replaces the appearance
+features before affinities; geometry and position remain box-derived.
+See the [encoder comparison guide](Documentation/Implementation/28-encoder-comparison.md)
+for provenance, setup, evaluation, and comparison limitations.
+
 ## Run the implemented pipeline
 
 From this folder in the existing Conda environment:

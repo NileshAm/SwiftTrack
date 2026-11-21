@@ -11,7 +11,7 @@ from torch.cuda import is_available
 
 # PATHS: based on this file's location, so they do not depend on your terminal.
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DATA_ROOT = PROJECT_ROOT / "data"
+DATA_ROOT = PROJECT_ROOT / "Data"
 MOT17_ROOT = DATA_ROOT / "MOT17"
 MOT20_ROOT = DATA_ROOT / "MOT20"  # Not present locally yet; unused initially.
 DATASET_ROOT = MOT17_ROOT
@@ -72,6 +72,9 @@ SEED = 42
 CROP_BATCH_SIZE = 16  # Only used if explicitly switching back to DenseNet121.
 CROP_SIZE = (256, 128)  # DenseNet-only (height, width).
 ENCODER_NAME = "detr_resnet50"
+# Encoder comparison: densenet121 -> 1024, detr_resnet50 -> 256, osnet_reid -> 512.
+# Each encoder needs separately trained association weights and a unique RUN_NAME.
+REID_WEIGHTS_PATH = PROJECT_ROOT / "weights" / "reid" / "osnet_x1_0_msmt17.pth"
 USE_PRETRAINED_WEIGHTS = True  # Official DETR weights are already cached in dragon-track.
 FREEZE_ENCODER = True  # Restore original pretrained DETR features; train only graph/association weights.
 DETR_GRADIENT_CHECKPOINTING = False  # Faster with spare VRAM; True trades compute for less memory.
