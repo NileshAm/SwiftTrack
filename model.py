@@ -29,7 +29,7 @@ class AssociationModel(nn.Module):
             GraphAttention(hidden_dims[0], hidden_dims[1])])
         self.matcher = LearnableSinkhorn()
 
-    def forward(self, graph):
+    def forward(self, graph, *, use_graph=True):
         device = next(self.parameters()).device
         nodes = graph["node_features"].to(device)
         edges = graph["edge_index"].to(device)
@@ -43,12 +43,15 @@ class AssociationModel(nn.Module):
             raise ValueError("Expected two directed edges and five raw attributes per candidate")
         if mask.shape != (t, d) or not torch.equal(mask.nonzero(), pairs):
             raise ValueError("Candidate pairs must follow mask order")
-        relationships = self.relationships(nodes, edges, attributes)
-        embeddings = nodes
+        relationships = None
+        embeddings = nodes[:, :-4]
         attention_weights = []
-        for layer in self.attention:
-            embeddings, weights = layer(embeddings, edges, relationships)
-            attention_weights.append(weights)
+        if use_graph:
+            relationships = self.relationships(nodes, edges, attributes)
+            embeddings = nodes
+            for layer in self.attention:
+                embeddings, weights = layer(embeddings, edges, relationships)
+                attention_weights.append(weights)
         unit = F.normalize(embeddings, dim=1, eps=1e-8)
         rows, cols = pairs.unbind(dim=1)
         similarity = (unit[rows] * unit[t + cols]).sum(1).clamp(-1, 1)

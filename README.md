@@ -3,6 +3,23 @@ An extension of DragonTrack, a transformer-enhanced graph-based multi-person tra
 
 ## Appearance encoder comparison
 
+Run graph ablations sequentially using existing trained checkpoints (no training):
+
+```bash
+python gcn_ablation.py --encoder reid
+# Or all three encoders, each with graph followed by without graph:
+python gcn_ablation.py --encoder all
+```
+
+Each invocation creates a fresh timestamped directory under `outputs/gcn_ablations/`,
+with per-arm tracks, evaluation plots/logs and a combined `comparison.md`/CSV.
+Existing experiments are preserved. Without graph uses raw appearance cosine
+and the same checkpoint's learned Sinkhorn matcher and Hungarian assignment;
+it bypasses relationship affinities and residual graph layers without retraining.
+This is an inference ablation: the matcher was calibrated on graph features.
+Failures are logged and remaining arms are attempted; the final command exits
+with an error if any arm failed. Keep the computer awake and on power during runs.
+
 DenseNet121, DETR, and frozen MSMT17-pretrained OSNet ReID can be compared with
 separate association training runs and shared detections/splits:
 

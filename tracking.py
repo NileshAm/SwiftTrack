@@ -162,7 +162,7 @@ def make_evaluation_video(sequence=None, split=None, *, overall=None):
 
 
 @torch.no_grad()
-def run_sequence(sequence, model, encoder, split=None, *, overall=None):
+def run_sequence(sequence, model, encoder, split=None, *, overall=None, use_graph=True):
     """Track one selected sequence, save MOT rows/preview, and report timing.
 
     Expire tracks before association if the gap already contains more than
@@ -208,7 +208,7 @@ def run_sequence(sequence, model, encoder, split=None, *, overall=None):
                                   else torch.empty((0, encoder.feature_dim)))
                 graph = build_graph(track_boxes, current["boxes"], track_features, features,
                                     image_size=(frame["height"], frame["width"]))
-                output = model(graph)
+                output = model(graph, use_graph=use_graph)
                 error = output["marginal_error"].item()
                 max_error = max(max_error, error)
                 max_normalization_error = max(max_normalization_error, output["normalization_error"].item())
@@ -253,7 +253,9 @@ def run_sequence(sequence, model, encoder, split=None, *, overall=None):
         "complete": True, "split": context["split"], "data_split": split_manifest(),
         "dataset_root": str(context["dataset_root"].resolve()), "dataset_split": context["dataset_split"],
         "sinkhorn_iterations": config.SINKHORN_ITERATIONS, "save_video": context["save_video"],
-        "device": config.DEVICE, "method": "paper_inspired_attention", "model_version": MODEL_VERSION,
+        "device": config.DEVICE,
+        "method": "paper_inspired_attention" if use_graph else "raw_appearance_cosine",
+        "use_graph": use_graph, "model_version": MODEL_VERSION,
         "assignment": "negative_log_scores_with_track_and_detection_unmatched_costs",
         "tracker_settings": settings,
         "timing": "frame loop including image reads and output; excludes model/metadata loading, final preview and video",
@@ -266,7 +268,7 @@ def run_sequence(sequence, model, encoder, split=None, *, overall=None):
     return summary
 
 
-def main():
+def main(*, use_graph=True):
     """Load graph and appearance weights from one compatible checkpoint; track clips."""
     tracker_settings()
     if config.MATCH_THRESHOLD is None or not 0 <= config.MATCH_THRESHOLD <= 1:
@@ -338,7 +340,8 @@ def main():
         for index, (sequence, split) in enumerate(jobs, 1):
             overall.set_postfix(video=f"{index}/{len(jobs)}", split=split,
                                 sequence=sequence, refresh=False)
-            summaries.append(run_sequence(sequence, model, encoder, split=split, overall=overall))
+            summaries.append(run_sequence(sequence, model, encoder, split=split, overall=overall,
+                                          use_graph=use_graph))
     return summaries
 
 
