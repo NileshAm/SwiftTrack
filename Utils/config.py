@@ -11,7 +11,7 @@ from torch.cuda import is_available
 
 # PATHS: based on this file's location, so they do not depend on your terminal.
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DATA_ROOT = PROJECT_ROOT / "Data"
+DATA_ROOT = PROJECT_ROOT / "data"
 MOT17_ROOT = DATA_ROOT / "MOT17"
 MOT20_ROOT = DATA_ROOT / "MOT20"  # Not present locally yet; unused initially.
 DATASET_ROOT = MOT17_ROOT

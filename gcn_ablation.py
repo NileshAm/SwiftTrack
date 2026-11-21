@@ -1,7 +1,8 @@
-"""Sequential tracking/evaluation with and without graph refinement; no training.
+"""Sequential tracking/evaluation with and without graph refinement.
 
 python gcn_ablation.py                  # OSNet, with graph then direct cosine
 python gcn_ablation.py --encoder all    # Repeat for DenseNet, DETR, OSNet
+python gcn_ablation.py --encoder all --prepare --epochs 4  # Code-only setup + training
 
 Both arms retain the checkpoint's learned Sinkhorn unmatched preference, score
 scale, candidate gate and Hungarian assignment. This is an inference bypass
@@ -61,15 +62,23 @@ def save_report(root, rows):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--encoder', choices=['reid', 'detr', 'densenet', 'all'], default='reid')
+    parser.add_argument('--prepare', action='store_true', help='Download assets and train missing checkpoints before ablation')
+    parser.add_argument('--epochs', type=int, default=4, help='Total training budget with --prepare (default: 4)')
+    parser.add_argument('--run-tag', help='Checkpoint namespace; --prepare defaults to scratch_<epochs>ep')
     args = parser.parse_args()
+    if args.epochs < 1:
+        parser.error('--epochs must be positive')
     encoders = ['densenet', 'detr', 'reid'] if args.encoder == 'all' else [args.encoder]
+    if args.prepare:
+        from prepare_ablation import prepare
+        args.run_tag = prepare(encoders, args.epochs, args.run_tag)
     # Fail before starting a long run if a requested checkpoint/evaluator is absent.
     import trackeval  # noqa: F401
     import torch
     import tracking
     import evaluate
     for encoder in encoders:
-        configure(encoder)
+        configure(encoder, run_tag=args.run_tag)
         if not config.CHECKPOINT_PATH.is_file():
             raise FileNotFoundError(config.CHECKPOINT_PATH)
     root = config.PROJECT_ROOT / 'outputs' / 'gcn_ablations' / datetime.now().strftime('%Y%m%d_%H%M%S_%f')
@@ -77,14 +86,14 @@ def main():
     print(f'Results: {root}', flush=True)
     rows = []
     for encoder in encoders:
-        configure(encoder)
+        configure(encoder, run_tag=args.run_tag)
         checkpoint_path = config.CHECKPOINT_PATH
         checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=True)
         identity = {'path': str(checkpoint_path), 'sha256': file_digest(checkpoint_path),
                     'epoch': checkpoint['epoch']}
         del checkpoint
         for use_graph in [True, False]:
-            configure(encoder)
+            configure(encoder, run_tag=args.run_tag)
             variant = 'with_gcn' if use_graph else 'without_gcn'
             folder = root / encoder / variant
             folder.mkdir(parents=True)

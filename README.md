@@ -11,6 +11,17 @@ python gcn_ablation.py --encoder reid
 python gcn_ablation.py --encoder all
 ```
 
+For a teammate with the code and MOT17 but no generated assets or checkpoints:
+
+```bash
+python gcn_ablation.py --encoder all --prepare --epochs 4
+```
+
+This downloads public assets, imports training/validation detections, trains or
+resumes each encoder in separate `scratch_4ep` folders, then runs the ablations.
+See [setup from scratch](Documentation/Implementation/29-ablation-from-scratch.md)
+for requirements, generated files and restart behavior.
+
 Each invocation creates a fresh timestamped directory under `outputs/gcn_ablations/`,
 with per-arm tracks, evaluation plots/logs and a combined `comparison.md`/CSV.
 Existing experiments are preserved. Without graph uses raw appearance cosine

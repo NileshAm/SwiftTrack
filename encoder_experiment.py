@@ -9,7 +9,7 @@ import importlib
 from Utils import config
 
 
-def configure(encoder, epochs=None):
+def configure(encoder, epochs=None, *, run_tag=None):
     name, width = {
         "densenet": ("densenet121", 1024),
         "detr": ("detr_resnet50", 256),
@@ -18,6 +18,10 @@ def configure(encoder, epochs=None):
     config.ENCODER_NAME, config.FEATURE_DIM = name, width
     config.FREEZE_ENCODER = config.USE_PRETRAINED_WEIGHTS = True
     config.RUN_NAME = f"encoder_comparison_{encoder}_v1"
+    if run_tag is not None:
+        if not run_tag or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-' for c in run_tag):
+            raise ValueError('run_tag must contain only letters, numbers, underscores or hyphens')
+        config.RUN_NAME = f"encoder_comparison_{encoder}_{run_tag}"
     config.OUTPUT_DIR = config.PROJECT_ROOT / "outputs" / config.RUN_NAME
     config.CHECKPOINT_PATH = config.OUTPUT_DIR / "model.pt"
     config.TRACK_OUTPUT_DIR = config.OUTPUT_DIR / "tracking" / config.TRACKING_VARIANT / config.TRACK_SPLIT
