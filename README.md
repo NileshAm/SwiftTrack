@@ -1,6 +1,20 @@
 # SwiftTrack
 An extension of DragonTrack, a transformer-enhanced graph-based multi-person tracking framework. This project builds upon the original DragonTrack implementation with the goal of investigating, developing, and evaluating further improvements to the tracking framework.
 
+## Unattended detector experiments
+
+```powershell
+python detector_suite.py --check-only  # Prepare dependencies/models; one-frame checks
+python detector_suite.py               # Sequential A-E; rerun to resume
+```
+
+Runs Tracktor, newly fine-tuned RT-DETR, pretrained YOLO26-S, pretrained RF-DETR-S,
+and high/low confidence recovery for the best successful scored detector. Missing
+public assets and association checkpoints are generated automatically. For S+M
+variants use `--sizes sm --run-dir outputs/detector_suite_sm_v1`.
+Read [the detector suite guide](Documentation/Implementation/30-detector-suite.md)
+for requirements, runtime, isolation, comparison limitations and failure recovery.
+
 ## Appearance encoder comparison
 
 Run graph ablations sequentially using existing trained checkpoints (no training):
