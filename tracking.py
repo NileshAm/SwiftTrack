@@ -17,7 +17,7 @@ from tqdm.auto import tqdm
 
 from Utils import config
 from Utils.data import load_sequence, read_image
-from Utils.detections import detection_path, detection_settings
+from Utils.detections import detection_path, detection_settings, file_digest
 from Utils.features import load_encoder, extract_features
 from Utils.graph import build_graph
 from model import AssociationModel, MODEL_VERSION
@@ -193,7 +193,7 @@ def associate_frame(model, track_boxes, boxes, track_features, features, scores,
 
 
 @torch.no_grad()
-def run_sequence(sequence, model, encoder, split=None, *, overall=None, use_graph=True, recovery_high=None, recovery_low=None):
+def run_sequence(sequence, model, encoder, split=None, *, overall=None, use_graph=True, recovery_high=None, recovery_low=None, detection_override=None):
     """Track one selected sequence, save MOT rows/preview, and report timing.
 
     Expire tracks before association if the gap already contains more than
@@ -210,7 +210,8 @@ def run_sequence(sequence, model, encoder, split=None, *, overall=None, use_grap
             raise FileExistsError(f"{output_dir / name} exists. Choose a new output folder.")
     sequence_path, frame_range = context["sequence_path"], context["frame_range"]
     tqdm.write(f"{sequence} {context['split']}: frames {frame_range[0]}..{frame_range[1]}")
-    resolved_detections = detection_path(sequence_path)
+    resolved_detections = (Path(detection_override).resolve() if detection_override is not None
+                           else detection_path(sequence_path))
     frames = load_sequence(sequence_path, resolved_detections, frame_range,
                            box_origin=config.BOX_ORIGIN,
                            min_score=config.DETECTION_MIN_SCORE if recovery_low is None else recovery_low)
@@ -273,6 +274,8 @@ def run_sequence(sequence, model, encoder, split=None, *, overall=None, use_grap
         "raw_mot_rows": raw_row_count, "confirmed_ids": len(confirmed_ids),
         "output_filter": "offline_observation_count_confirmation",
         "detection_file": str(resolved_detections), "detections": detection_settings(),
+        "inference_detection_override": detection_override is not None,
+        "inference_detection_sha256": file_digest(resolved_detections),
         "ids_created": next_id-1, "seconds": seconds, "fps": len(frames)/seconds,
         "max_marginal_error": max_error, "max_normalization_error": max_normalization_error,
         "checkpoint": str(Path(config.CHECKPOINT_PATH).resolve()),
@@ -301,7 +304,7 @@ def run_sequence(sequence, model, encoder, split=None, *, overall=None, use_grap
     return summary
 
 
-def main(*, use_graph=True, recovery_high=None, recovery_low=None):
+def main(*, use_graph=True, recovery_high=None, recovery_low=None, detection_overrides=None):
     """Load graph and appearance weights from one compatible checkpoint; track clips."""
     tracker_settings()
     if recovery_low is not None and (recovery_high is None or not 0 <= recovery_low < recovery_high <= 1):
@@ -322,12 +325,19 @@ def main(*, use_graph=True, recovery_high=None, recovery_low=None):
     jobs += [(sequence, "test") for sequence in config.TEST_SEQUENCES]
     if not jobs:
         raise ValueError("Enable RUN_SPLIT_TRACKING or add TEST_SEQUENCES")
+    if detection_overrides is not None:
+        if set(detection_overrides) != {sequence for sequence, _ in jobs}:
+            raise ValueError('Detection overrides must cover exactly the selected sequences')
+        for path in detection_overrides.values():
+            if not Path(path).is_file():
+                raise FileNotFoundError(f'Missing explicit inference detections: {path}')
     total_frames = 0
     for sequence, split in jobs:
         context = tracking_context(sequence, split)
         first, last = context["frame_range"]
         total_frames += (last - first + 1) * (2 if context["save_video"] else 1)
-        detection_path(context["sequence_path"])
+        if detection_overrides is None:
+            detection_path(context["sequence_path"])
         for name in ("tracks.txt", "summary.json", "video.mp4", "preview.jpg", ".tracks.pending.txt"):
             path = context["output_dir"] / name
             if path.exists():
@@ -377,7 +387,8 @@ def main(*, use_graph=True, recovery_high=None, recovery_low=None):
                                 sequence=sequence, refresh=False)
             summaries.append(run_sequence(sequence, model, encoder, split=split, overall=overall,
                                           use_graph=use_graph, recovery_high=recovery_high,
-                                          recovery_low=recovery_low))
+                                          recovery_low=recovery_low,
+                                          detection_override=None if detection_overrides is None else detection_overrides[sequence]))
     return summaries
 
 

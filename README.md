@@ -240,6 +240,24 @@ This repository extends and modifies the original DragonTrack implementation wit
 
 Please refer to the original DragonTrack work and cite the corresponding paper when using this project for research.
 
+## Local Faster R-CNN scale experiment
+
+After completing `detector_suite.py`, run from the project root:
+
+```powershell
+conda activate dragontrack
+python fasterrcnn_experiment.py --smoke
+python fasterrcnn_experiment.py
+```
+
+This compares official COCO-pretrained Faster R-CNN-FPN v2 full-frame inference
+against full-frame plus overlapping tiles, evaluates cached boxes, then tracks
+both and Tracktor using OSNet without graph. Results are saved separately in
+`outputs/fasterrcnn_scales_v1/comparison.md`. Add `--detector-only` to stop after
+box evaluation. This is a local detector experiment, not an exact reproduction
+of the imported Tracktor preprocessing. See the
+[scale experiment guide](Documentation/Implementation/34-fasterrcnn-scales.md).
+
 # License
 
 This project is released under the MIT License. Portions of the code derived from the original DragonTrack implementation remain subject to the copyright and license notices of the original authors.
