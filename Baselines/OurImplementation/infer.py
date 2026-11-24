@@ -1,4 +1,4 @@
-"""Run this project's trained association tracker on GT, Tracktor and YOLOX boxes.
+"""Run this project's association tracker on GT, Tracktor, YOLOX or Iter boxes.
 
 GT person IDs are removed before tracking. Each detector gets its own MOT tracks
 and summary files; run evaluate.py afterward to score the saved predictions.
@@ -23,6 +23,7 @@ from Utils.features import load_encoder  # noqa: E402
 from Utils.splits import validate_video_splits  # noqa: E402
 from Utils.yolox_osnet import (cache_for_sequence as validate_yolox,
                               cache_for_checkpoint)  # noqa: E402
+from Utils.itere2edet import cache_for_sequence as validate_iter  # noqa: E402
 from model import AssociationModel, MODEL_VERSION  # noqa: E402
 import tracking  # noqa: E402
 
@@ -102,6 +103,9 @@ def source_file(detector, sequence_path, args, output):
         return gt_person_cache(sequence_path, output / "detection_inputs/gt" / f"{sequence_path.name}.txt")
     if detector == "tracktor":
         return validate_tracktor(sequence_path)
+    if detector == "iter":
+        cache, _ = validate_iter(args.iter_cache_dir, sequence_path, args.iter_checkpoint)
+        return cache
     if args.yolox_checkpoint is None:
         cache, _ = validate_yolox(args.yolox_cache_dir, sequence_path)
     else:
@@ -114,13 +118,19 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", type=Path, required=True,
                         help="model.pt or last.pt from our association trainer")
-    parser.add_argument("--detectors", nargs="+", choices=("gt", "tracktor", "yolox"),
+    parser.add_argument("--detectors", nargs="+", choices=("gt", "tracktor", "yolox", "iter"),
                         default=("gt", "tracktor", "yolox"))
     parser.add_argument("--tracktor-cache-dir", type=Path, default=config.TRACKTOR_CACHE_DIR)
     parser.add_argument("--yolox-cache-dir", type=Path,
                         default=PROJECT / "detections/yolox_x_mot20_val_v1")
     parser.add_argument("--yolox-checkpoint", type=Path,
                         help="Fine-tuned best.pth used for this YOLOX cache")
+    parser.add_argument("--iter-cache-dir", type=Path,
+                        default=PROJECT / "detections/iter_e2edet_resolution_v2/higher_960_1600")
+    parser.add_argument("--iter-checkpoint", type=Path,
+                        help="Required for Iter: official model.pth or fine-tuned best.pth used for its cache")
+    parser.add_argument("--iter-short-side", type=int, default=960)
+    parser.add_argument("--iter-max-size", type=int, default=1600)
     parser.add_argument("--finetuned-osnet-weights", type=Path,
                         help="Optional best.pt from osnet-train.py; transfers into a frozen-OSNet association model")
     parser.add_argument("--graph", choices=("on", "off"), default="on")
@@ -135,6 +145,12 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if len(set(args.detectors)) != len(args.detectors):
         parser.error("List each detector only once")
+    if "iter" in args.detectors and args.iter_checkpoint is None:
+        parser.error("--detectors iter requires --iter-checkpoint to verify cache provenance")
+    if args.iter_checkpoint is not None and "iter" not in args.detectors:
+        parser.error("--iter-checkpoint requires --detectors iter")
+    if args.iter_short_side < 32 or args.iter_max_size < args.iter_short_side:
+        parser.error("Invalid Iter inference resolution")
     if any(not 0 <= value <= 1 for value in
            (args.detection_min_score, args.new_track_min_score)) or (
             args.match_threshold is not None and not 0 <= args.match_threshold <= 1):
@@ -162,6 +178,10 @@ def main(argv=None):
         args.yolox_checkpoint = args.yolox_checkpoint.resolve()
         if not args.yolox_checkpoint.is_file():
             parser.error(f"Missing YOLOX checkpoint: {args.yolox_checkpoint}")
+    if args.iter_checkpoint is not None:
+        args.iter_checkpoint = args.iter_checkpoint.resolve()
+        if not args.iter_checkpoint.is_file():
+            parser.error(f"Missing Iter checkpoint: {args.iter_checkpoint}")
     model, encoder, transfer = load_models(checkpoint, args.device, osnet_weights)
     output = (args.output_dir or PROJECT / "outputs/our_implementation" /
               datetime.now().strftime("%Y%m%d_%H%M%S_%f")).resolve()
@@ -174,11 +194,15 @@ def main(argv=None):
         for sequence in config.VAL_SEQUENCES:
             sequence_path = config.DATASET_ROOT / config.DATASET_SPLIT / sequence
             path = source_file(detector, sequence_path, args, output)
-            if detector == "yolox":
+            if detector in ("yolox", "iter"):
                 summary = json.loads(path.with_name("summary.json").read_text())
-                cache_floor = summary["identity"]["detector"]["min_score"]
+                recipe = summary["identity"]["detector"]
+                cache_floor = recipe["min_score"]
                 if args.detection_min_score < cache_floor:
-                    raise ValueError(f"{sequence}: requested score is below YOLOX cache floor {cache_floor}")
+                    raise ValueError(f"{sequence}: requested score is below {detector} cache floor {cache_floor}")
+                if detector == "iter" and (recipe.get("short_side"), recipe.get("max_size")) != (
+                        args.iter_short_side, args.iter_max_size):
+                    raise ValueError(f"{sequence}: Iter cache resolution differs from --iter-short-side/--iter-max-size")
             sources[detector][sequence] = {"file": str(path), "sha256": file_digest(path)}
     with tqdm(total=len(args.detectors) * len(config.VAL_SEQUENCES),
               desc="Our tracker inference", unit="video") as overall:
@@ -201,6 +225,10 @@ def main(argv=None):
         "train_sequences": config.TRAIN_SEQUENCES, "sequences": config.VAL_SEQUENCES,
         "detectors": args.detectors, "sources": sources,
         "yolox_checkpoint": str(args.yolox_checkpoint) if args.yolox_checkpoint else None,
+        "iter_checkpoint": str(args.iter_checkpoint) if args.iter_checkpoint else None,
+        "iter_checkpoint_sha256": file_digest(args.iter_checkpoint) if args.iter_checkpoint else None,
+        "iter_cache_dir": str(args.iter_cache_dir.resolve()) if "iter" in args.detectors else None,
+        "iter_resolution": [args.iter_short_side, args.iter_max_size] if "iter" in args.detectors else None,
         "detection_min_score": args.detection_min_score,
         "new_track_min_score": args.new_track_min_score,
         "match_threshold": config.MATCH_THRESHOLD,

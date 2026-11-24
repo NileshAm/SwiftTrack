@@ -128,7 +128,7 @@ def train_epoch(model, loader, optimizer, accumulation, device, amp, overall):
     return total/len(loader)
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", type=Path, default=ROOT/"weights/iter_e2edet/model.pth")
     parser.add_argument("--output-dir", type=Path, default=ROOT/"outputs/itere2edet_mot17_finetune_v1")
@@ -146,10 +146,11 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--amp", action="store_true", help="Use CUDA bfloat16 autocast; keep off if unsupported")
     parser.add_argument("--resume", action="store_true", help="Continue from latest.pth in --output-dir")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if (args.epochs < 1 or args.batch_size < 1 or args.accumulation < 1 or args.frame_stride < 1
             or args.train_short_side < 32 or args.train_max_size < args.train_short_side
-            or not all(math.isfinite(x) and x > 0 for x in (args.lr, args.backbone_lr, args.weight_decay))
+            or not all(math.isfinite(x) and x > 0 for x in (args.lr, args.backbone_lr))
+            or not math.isfinite(args.weight_decay) or args.weight_decay < 0
             or any(not math.isfinite(score) or not 0.05 <= score <= 1 for score in args.scores)):
         parser.error("Invalid epoch, batch, resolution, optimizer or score setting")
     if args.amp and (not args.device.startswith("cuda") or not torch.cuda.is_bf16_supported()):

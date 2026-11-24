@@ -20,6 +20,7 @@ from Utils.detections import file_digest, validate_tracktor  # noqa: E402
 from Utils.splits import validate_video_splits  # noqa: E402
 from Utils.yolox_osnet import (cache_for_sequence as validate_yolox,
                               cache_for_checkpoint)  # noqa: E402
+from Utils.itere2edet import cache_for_sequence as validate_iter  # noqa: E402
 import train as association_training  # noqa: E402
 
 
@@ -49,7 +50,7 @@ def prepare_detections(detector, sequences, output, args):
         elif detector == "tracktor":
             config.TRACKTOR_CACHE_DIR = args.tracktor_cache_dir.resolve()
             file = validate_tracktor(path)
-        else:
+        elif detector == "yolox":
             if args.yolox_checkpoint is None:
                 file, summary = validate_yolox(args.yolox_cache_dir, path)
             else:
@@ -58,6 +59,14 @@ def prepare_detections(detector, sequences, output, args):
             floor = summary["identity"]["detector"]["min_score"]
             if args.detection_min_score is not None and args.detection_min_score < floor:
                 raise ValueError(f"{sequence}: requested score is below YOLOX cache floor {floor}")
+        elif detector == "iter":
+            file, summary = validate_iter(args.iter_cache_dir, path, args.iter_checkpoint)
+            recipe = summary["identity"]["detector"]
+            if (recipe.get("short_side"), recipe.get("max_size")) != (args.iter_short_side, args.iter_max_size):
+                raise ValueError(f"{sequence}: Iter cache resolution differs from --iter-short-side/--iter-max-size")
+            floor = recipe["min_score"]
+            if args.detection_min_score is not None and args.detection_min_score < floor:
+                raise ValueError(f"{sequence}: requested score is below Iter cache floor {floor}")
         config.DETECTION_FILES[sequence] = str(file)
     config.DETECTION_BACKEND = "mapped"
 
@@ -66,7 +75,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, required=True,
                         help="One detector: exact run folder; multiple: parent folder with one run per detector")
-    parser.add_argument("--detectors", nargs="+", choices=("config", "gt", "tracktor", "yolox"),
+    parser.add_argument("--detectors", nargs="+", choices=("config", "gt", "tracktor", "yolox", "iter"),
                         default=("config",), help="Box sources; each gets a separate association model")
     parser.add_argument("--encoder", choices=("config", *ENCODERS), default="config")
     parser.add_argument("--epochs", type=int, default=config.EPOCHS,
@@ -108,6 +117,24 @@ def main(argv=None):
     parser.add_argument("--yolox-height", type=int, default=544)
     parser.add_argument("--yolox-cache-min-score", type=float, default=0.1)
     parser.add_argument("--yolox-nms-iou", type=float, default=0.7)
+    parser.add_argument("--iter-cache-dir", type=Path, help="Complete Iter cache; with --make-iter-cache, export here")
+    parser.add_argument("--iter-checkpoint", type=Path,
+                        help="Official CrowdHuman model.pth or a fine-tuned Iter best.pth")
+    parser.add_argument("--make-iter-cache", action="store_true",
+                        help="Export Iter detections for all train and validation videos")
+    parser.add_argument("--train-iter", action="store_true",
+                        help="Fine-tune Iter, export its best weights, then train association")
+    parser.add_argument("--iter-train-output-dir", type=Path)
+    parser.add_argument("--iter-train-epochs", type=int, default=5)
+    parser.add_argument("--iter-train-batch-size", type=int, default=1)
+    parser.add_argument("--iter-train-accumulation", type=int, default=4)
+    parser.add_argument("--iter-train-frame-stride", type=int, default=1)
+    parser.add_argument("--iter-train-lr", type=float, default=1e-5)
+    parser.add_argument("--iter-train-backbone-lr", type=float, default=1e-6)
+    parser.add_argument("--iter-train-weight-decay", type=float, default=1e-4)
+    parser.add_argument("--iter-short-side", type=int, default=960)
+    parser.add_argument("--iter-max-size", type=int, default=1600)
+    parser.add_argument("--iter-cache-min-score", type=float, default=0.05)
     parser.add_argument("--device", default=config.DEVICE)
     parser.add_argument("--train-sequences", nargs="+", default=config.TRAIN_SEQUENCES)
     parser.add_argument("--val-sequences", nargs="+", default=config.VAL_SEQUENCES)
@@ -119,6 +146,10 @@ def main(argv=None):
         parser.error("YOLOX options require --detectors yolox")
     if args.train_yolox and args.yolox_checkpoint is not None:
         parser.error("Choose --train-yolox or --yolox-checkpoint, not both")
+    if (args.train_iter or args.make_iter_cache or args.iter_checkpoint or args.iter_cache_dir) and "iter" not in args.detectors:
+        parser.error("Iter options require --detectors iter")
+    if args.train_iter and args.iter_checkpoint is not None:
+        parser.error("Choose --train-iter or --iter-checkpoint, not both")
     if (args.epochs < 1 or args.batch_size < 1 or args.val_batch_size < 1 or args.lookback < 1
             or not math.isfinite(args.learning_rate) or args.learning_rate <= 0):
         parser.error("Epochs, batch sizes, lookback and learning rate must be positive")
@@ -142,6 +173,14 @@ def main(argv=None):
             or not 0 <= args.yolox_cache_min_score <= 1
             or not 0 < args.yolox_nms_iou <= 1):
         parser.error("Invalid YOLOX fine-tuning or cache settings")
+    if (min(args.iter_train_epochs, args.iter_train_batch_size, args.iter_train_accumulation,
+            args.iter_train_frame_stride, args.iter_short_side) < 1
+            or args.iter_max_size < args.iter_short_side
+            or not 0 < args.iter_train_lr < float("inf")
+            or not 0 < args.iter_train_backbone_lr < float("inf")
+            or not 0 <= args.iter_train_weight_decay < float("inf")
+            or not 0 <= args.iter_cache_min_score <= 1):
+        parser.error("Invalid Iter fine-tuning, resolution or cache settings")
     if args.encoder != "config":
         config.ENCODER_NAME, config.FEATURE_DIM = ENCODERS[args.encoder]
         config.FREEZE_ENCODER = True
@@ -207,6 +246,35 @@ def main(argv=None):
             if args.yolox_checkpoint is not None:
                 export_args += ["--checkpoint", str(args.yolox_checkpoint)]
             call_script("detect-yolox.py", export_args)
+    if "iter" in args.detectors:
+        args.iter_cache_dir = (args.iter_cache_dir or
+            (args.output_dir / "iter_cache" if args.train_iter or args.make_iter_cache
+             else PROJECT / "detections/iter_e2edet_resolution_v2/higher_960_1600")).resolve()
+        if args.train_iter:
+            detector_dir = (args.iter_train_output_dir or args.output_dir / "iter_detector").resolve()
+            train_args = ["--output-dir", str(detector_dir), "--epochs", str(args.iter_train_epochs),
+                          "--batch-size", str(args.iter_train_batch_size),
+                          "--accumulation", str(args.iter_train_accumulation),
+                          "--frame-stride", str(args.iter_train_frame_stride),
+                          "--train-short-side", str(args.iter_short_side),
+                          "--train-max-size", str(args.iter_max_size),
+                          "--lr", str(args.iter_train_lr),
+                          "--backbone-lr", str(args.iter_train_backbone_lr),
+                          "--weight-decay", str(args.iter_train_weight_decay),
+                          "--device", args.device]
+            if args.resume:
+                train_args.append("--resume")
+            call_script("detector-train-itere2edet.py", train_args)
+            args.iter_checkpoint = detector_dir / "best.pth"
+        args.iter_checkpoint = (args.iter_checkpoint or PROJECT / "weights/iter_e2edet/model.pth").resolve()
+        if not args.iter_checkpoint.is_file():
+            parser.error(f"Missing Iter checkpoint: {args.iter_checkpoint}")
+        if args.make_iter_cache or args.train_iter:
+            call_script("detect-itere2edet.py", [
+                "--checkpoint", str(args.iter_checkpoint), "--split", "all",
+                "--cache-dir", str(args.iter_cache_dir),
+                "--short-side", str(args.iter_short_side), "--max-size", str(args.iter_max_size),
+                "--min-score", str(args.iter_cache_min_score), "--device", args.device])
     results = {}
     for detector in args.detectors:
         output = outputs[detector]

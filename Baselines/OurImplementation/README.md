@@ -1,6 +1,6 @@
 # Our implementation: reproducible train, infer, evaluate
 
-These entry points use the existing project code in `train.py`, `tracking.py`, `model.py` and `Utils/`. They keep each run's checkpoint, detection inputs, tracks and metrics in explicit folders. They do not retrain the detector. Choose GT, Tracktor, or pretrained YOLOX boxes with `--detectors`; **each choice trains a separate association model**. The authors' GitHub release trains on GT boxes, so use `--detectors gt` for a closer training-source comparison.
+These entry points use the existing project code in `train.py`, `tracking.py`, `model.py` and `Utils/`. They keep each run's checkpoint, detection inputs, tracks and metrics in explicit folders. Choose GT, Tracktor, YOLOX or Iter-E2EDET boxes with `--detectors`; **each choice trains a separate association model**. The detector remains frozen during association training. The authors' GitHub release trains on GT boxes, so use `--detectors gt` for a closer training-source comparison.
 
 Run from the project root in the existing Conda environment:
 
@@ -13,6 +13,39 @@ python Baselines/OurImplementation/train.py --detectors gt tracktor yolox --enco
 This example saves three independent checkpoints at `association_models/<detector>/model.pt`; each detector folder also contains `last.pt`. For a single detector, `--output-dir` is its exact run folder. To continue an interrupted run through a larger **total** epoch target, use the same detector choice and output folder and add `--resume --epochs 40`. Training and validation use complete, disjoint videos from `Utils/config.py` by default; `--train-sequences` and `--val-sequences` can override the lists for a new run. `--encoder` accepts `detr`, `osnet`, `densenet`, or `config` (the current config choice). Also available: `--association-distance-px`, `--loss-alpha`, `--negative-ratio`, and `--match-threshold`. The match threshold is saved for inference; it does not change the training loss. Training computes a teacher-forced validation loss, not tracking HOTA.
 
 Without extra flags, YOLOX association training consumes the **pretrained CrowdHuman + MOT20 detection cache**. GT-box training writes identity-free person-box files inside its run folder. Tracktor uses its validated import cache. Set `--yolox-cache-dir` or `--tracktor-cache-dir` when using another cache location. The script never edits `Utils/config.py`; its choices are saved inside each checkpoint. Use a separate output directory for another encoder or settings combination.
+
+### Iter-E2EDET detector input
+
+Iter-E2EDET uses the authors' inference preprocessing at 960/1600 with no extra NMS. The pretrained resolution cache contains validation videos only, so association **training** must create or point to a cache containing both training and validation videos. To use the already fine-tuned detector checkpoint without retraining it:
+
+```bash
+python Baselines/OurImplementation/train.py \
+  --detectors iter --encoder osnet \
+  --iter-checkpoint outputs/itere2edet_mot17_finetune_v1/best.pth \
+  --make-iter-cache --iter-short-side 960 --iter-max-size 1600 \
+  --iter-cache-min-score 0.05 --detection-min-score 0.4 \
+  --epochs 30 --batch-size 2 --val-batch-size 4 \
+  --output-dir outputs/our_implementation/iter_finetuned_assoc
+```
+
+This creates `iter_cache/` for all seven configured videos, verifies every file against the fine-tuned checkpoint, and trains an independent association model. Pass `--iter-cache-dir` to use another complete cache. To use the official pretrained detector instead, pass `--iter-checkpoint weights/iter_e2edet/model.pth` and a fresh output directory. `--train-iter` optionally runs `detector-train-itere2edet.py` first; the `--iter-train-*` arguments control its epochs, batch size, accumulation, frame stride, learning rates and weight decay. `--make-iter-cache` alone does not fine-tune the detector.
+
+To infer and evaluate the fine-tuned Iter cache with the new association checkpoint:
+
+```bash
+python Baselines/OurImplementation/infer.py \
+  --checkpoint outputs/our_implementation/iter_finetuned_assoc/model.pt \
+  --detectors iter --iter-checkpoint outputs/itere2edet_mot17_finetune_v1/best.pth \
+  --iter-cache-dir outputs/our_implementation/iter_finetuned_assoc/iter_cache \
+  --iter-short-side 960 --iter-max-size 1600 \
+  --graph off --detection-min-score 0.4 --new-track-min-score 0.7 \
+  --output-dir outputs/our_implementation/iter_finetuned_assoc_val
+python Baselines/OurImplementation/evaluate.py outputs/our_implementation/iter_finetuned_assoc_val
+```
+
+`--iter-checkpoint` is required for Iter inference so the cache's model hash can be checked. The inference manifest records that hash, the cache path and resolution. The evaluator picks up Iter from the manifest without a separate detector flag.
+
+To compare Iter boxes with an **existing** OSNet association checkpoint, skip association training and pass that checkpoint to `infer.py`. For example, use `--checkpoint outputs/encoder_comparison_reid_v1/model.pt --detectors iter --iter-checkpoint outputs/itere2edet_mot17_finetune_v1/best.pth --iter-cache-dir detections/iter_e2edet_mot17_finetuned_v1 --graph off --detection-min-score 0.4 --new-track-min-score 0.7 --output-dir outputs/our_implementation/iter_existing_osnet_val`, then run `evaluate.py` on that output directory. The detector checkpoint must be the one that produced the selected cache.
 
 To fine-tune YOLOX, export detections from its best checkpoint, then train our association model on those detections:
 

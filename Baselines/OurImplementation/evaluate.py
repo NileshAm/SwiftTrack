@@ -1,4 +1,4 @@
-"""Score saved local-implementation tracks with MOT TrackEval on full validation videos.
+"""Score GT, Tracktor, YOLOX or Iter tracker outputs with MOT TrackEval.
 
 Run after infer.py: python Baselines/OurImplementation/evaluate.py RUN_DIR
 Uses the same HOTA, CLEAR and Identity metric implementations as the authors'
