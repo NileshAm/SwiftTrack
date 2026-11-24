@@ -37,6 +37,30 @@ def cache_for_sequence(cache_dir, sequence_path):
     return path.resolve(), summary
 
 
+def cache_for_checkpoint(cache_dir, sequence_path, checkpoint_sha256):
+    """Validate a YOLOX cache exported with the selected checkpoint."""
+    sequence_path = Path(sequence_path)
+    path = Path(cache_dir) / sequence_path.parent.name / sequence_path.name / 'det.txt'
+    summary_path = path.with_name('summary.json')
+    if not path.is_file() or not summary_path.is_file():
+        raise FileNotFoundError(f'Missing complete YOLOX cache: {path}')
+    summary = json.loads(summary_path.read_text())
+    info = _sequence_info(sequence_path)
+    identity = summary.get('identity', {})
+    detector = identity.get('detector', {})
+    if (summary.get('complete') is not True
+            or identity.get('sequence_path') != str(sequence_path.resolve())
+            or identity.get('frames') != info.getint('seqLength')
+            or identity.get('width') != info.getint('imWidth')
+            or identity.get('height') != info.getint('imHeight')
+            or detector.get('backend') != 'yolox'
+            or detector.get('checkpoint_sha256') != checkpoint_sha256
+            or detector.get('box_origin') != 1
+            or summary.get('sha256') != file_digest(path)):
+        raise ValueError(f'Changed, incomplete, or wrong-checkpoint YOLOX cache: {path}')
+    return path.resolve(), summary
+
+
 def cosine_matches(track_features, detection_features, predicted_boxes, detection_boxes,
                    *, min_similarity=0.7, center_distance=1.5):
     """One-to-one matching on OSNet cosine; gate by predicted center distance.

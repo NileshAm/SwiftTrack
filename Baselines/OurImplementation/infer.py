@@ -21,7 +21,8 @@ from Utils.benchmark_boxes import gt_person_cache  # noqa: E402
 from Utils.detections import file_digest, validate_tracktor  # noqa: E402
 from Utils.features import load_encoder  # noqa: E402
 from Utils.splits import validate_video_splits  # noqa: E402
-from Utils.yolox_osnet import cache_for_sequence as validate_yolox  # noqa: E402
+from Utils.yolox_osnet import (cache_for_sequence as validate_yolox,
+                              cache_for_checkpoint)  # noqa: E402
 from model import AssociationModel, MODEL_VERSION  # noqa: E402
 import tracking  # noqa: E402
 
@@ -101,7 +102,11 @@ def source_file(detector, sequence_path, args, output):
         return gt_person_cache(sequence_path, output / "detection_inputs/gt" / f"{sequence_path.name}.txt")
     if detector == "tracktor":
         return validate_tracktor(sequence_path)
-    cache, _ = validate_yolox(args.yolox_cache_dir, sequence_path)
+    if args.yolox_checkpoint is None:
+        cache, _ = validate_yolox(args.yolox_cache_dir, sequence_path)
+    else:
+        cache, _ = cache_for_checkpoint(args.yolox_cache_dir, sequence_path,
+                                        file_digest(args.yolox_checkpoint))
     return cache
 
 
@@ -114,6 +119,8 @@ def main(argv=None):
     parser.add_argument("--tracktor-cache-dir", type=Path, default=config.TRACKTOR_CACHE_DIR)
     parser.add_argument("--yolox-cache-dir", type=Path,
                         default=PROJECT / "detections/yolox_x_mot20_val_v1")
+    parser.add_argument("--yolox-checkpoint", type=Path,
+                        help="Fine-tuned best.pth used for this YOLOX cache")
     parser.add_argument("--finetuned-osnet-weights", type=Path,
                         help="Optional best.pt from osnet-train.py; transfers into a frozen-OSNet association model")
     parser.add_argument("--graph", choices=("on", "off"), default="on")
@@ -151,6 +158,10 @@ def main(argv=None):
     if args.confirm_min_hits is not None:
         config.TRACK_CONFIRM_MIN_HITS = args.confirm_min_hits
     osnet_weights = args.finetuned_osnet_weights.resolve() if args.finetuned_osnet_weights else None
+    if args.yolox_checkpoint is not None:
+        args.yolox_checkpoint = args.yolox_checkpoint.resolve()
+        if not args.yolox_checkpoint.is_file():
+            parser.error(f"Missing YOLOX checkpoint: {args.yolox_checkpoint}")
     model, encoder, transfer = load_models(checkpoint, args.device, osnet_weights)
     output = (args.output_dir or PROJECT / "outputs/our_implementation" /
               datetime.now().strftime("%Y%m%d_%H%M%S_%f")).resolve()
@@ -189,6 +200,7 @@ def main(argv=None):
         "dataset_split": config.DATASET_SPLIT,
         "train_sequences": config.TRAIN_SEQUENCES, "sequences": config.VAL_SEQUENCES,
         "detectors": args.detectors, "sources": sources,
+        "yolox_checkpoint": str(args.yolox_checkpoint) if args.yolox_checkpoint else None,
         "detection_min_score": args.detection_min_score,
         "new_track_min_score": args.new_track_min_score,
         "match_threshold": config.MATCH_THRESHOLD,

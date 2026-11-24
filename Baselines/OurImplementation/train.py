@@ -6,6 +6,7 @@ The detector models themselves stay frozen; this trains the association model.
 """
 
 import argparse
+import importlib.util
 import math
 from pathlib import Path
 import sys
@@ -15,15 +16,24 @@ sys.path.insert(0, str(PROJECT))
 
 from Utils import config  # noqa: E402
 from Utils.benchmark_boxes import gt_person_cache  # noqa: E402
-from Utils.detections import validate_tracktor  # noqa: E402
+from Utils.detections import file_digest, validate_tracktor  # noqa: E402
 from Utils.splits import validate_video_splits  # noqa: E402
-from Utils.yolox_osnet import cache_for_sequence as validate_yolox  # noqa: E402
+from Utils.yolox_osnet import (cache_for_sequence as validate_yolox,
+                              cache_for_checkpoint)  # noqa: E402
 import train as association_training  # noqa: E402
 
 
 ENCODERS = {"detr": ("detr_resnet50", 256),
             "osnet": ("osnet_reid", 512),
             "densenet": ("densenet121", 1024)}
+
+
+def call_script(filename, arguments):
+    path = PROJECT / filename
+    spec = importlib.util.spec_from_file_location(path.stem.replace("-", "_"), path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.main(arguments)
 
 
 def prepare_detections(detector, sequences, output, args):
@@ -40,7 +50,11 @@ def prepare_detections(detector, sequences, output, args):
             config.TRACKTOR_CACHE_DIR = args.tracktor_cache_dir.resolve()
             file = validate_tracktor(path)
         else:
-            file, summary = validate_yolox(args.yolox_cache_dir, path)
+            if args.yolox_checkpoint is None:
+                file, summary = validate_yolox(args.yolox_cache_dir, path)
+            else:
+                file, summary = cache_for_checkpoint(
+                    args.yolox_cache_dir, path, file_digest(args.yolox_checkpoint))
             floor = summary["identity"]["detector"]["min_score"]
             if args.detection_min_score is not None and args.detection_min_score < floor:
                 raise ValueError(f"{sequence}: requested score is below YOLOX cache floor {floor}")
@@ -71,13 +85,40 @@ def main(argv=None):
                         help="Saved for inference; not used to optimize training loss")
     parser.add_argument("--tracktor-cache-dir", type=Path, default=config.TRACKTOR_CACHE_DIR)
     parser.add_argument("--yolox-cache-dir", type=Path,
-                        default=PROJECT / "detections/yolox_x_mot20_val_v1")
+                        help="YOLOX cache to use or create")
+    parser.add_argument("--yolox-checkpoint", type=Path,
+                        help="Existing fine-tuned YOLOX best.pth for cache creation or reuse")
+    parser.add_argument("--train-yolox", action="store_true",
+                        help="Fine-tune YOLOX, export its best weights and train association")
+    parser.add_argument("--make-yolox-cache", action="store_true",
+                        help="Export YOLOX boxes for all train and validation videos")
+    parser.add_argument("--yolox-train-output-dir", type=Path)
+    parser.add_argument("--yolox-train-epochs", type=int, default=5)
+    parser.add_argument("--yolox-train-batch-size", type=int, default=1)
+    parser.add_argument("--yolox-train-accumulation", type=int, default=4)
+    parser.add_argument("--yolox-train-lr", type=float, default=5e-5)
+    parser.add_argument("--yolox-train-backbone-lr", type=float, default=5e-6)
+    parser.add_argument("--yolox-train-weight-decay", type=float, default=1e-5)
+    parser.add_argument("--yolox-train-score", type=float, default=0.25)
+    parser.add_argument("--yolox-train-min-precision", type=float, default=0.7)
+    parser.add_argument("--yolox-train-min-recall", type=float, default=0.55)
+    parser.add_argument("--yolox-train-fraction", type=float, default=1.0)
+    parser.add_argument("--yolox-train-frame-stride", type=int, default=1)
+    parser.add_argument("--yolox-width", type=int, default=960)
+    parser.add_argument("--yolox-height", type=int, default=544)
+    parser.add_argument("--yolox-cache-min-score", type=float, default=0.1)
+    parser.add_argument("--yolox-nms-iou", type=float, default=0.7)
+    parser.add_argument("--device", default=config.DEVICE)
     parser.add_argument("--train-sequences", nargs="+", default=config.TRAIN_SEQUENCES)
     parser.add_argument("--val-sequences", nargs="+", default=config.VAL_SEQUENCES)
     parser.add_argument("--resume", action="store_true", help="Continue this run's last.pt checkpoint")
     args = parser.parse_args(argv)
     if len(set(args.detectors)) != len(args.detectors) or ("config" in args.detectors and len(args.detectors) > 1):
         parser.error("List each detector once; 'config' cannot be combined with another detector")
+    if (args.train_yolox or args.make_yolox_cache or args.yolox_checkpoint) and "yolox" not in args.detectors:
+        parser.error("YOLOX options require --detectors yolox")
+    if args.train_yolox and args.yolox_checkpoint is not None:
+        parser.error("Choose --train-yolox or --yolox-checkpoint, not both")
     if (args.epochs < 1 or args.batch_size < 1 or args.val_batch_size < 1 or args.lookback < 1
             or not math.isfinite(args.learning_rate) or args.learning_rate <= 0):
         parser.error("Epochs, batch sizes, lookback and learning rate must be positive")
@@ -89,6 +130,18 @@ def main(argv=None):
             or not 0 <= args.loss_alpha <= 1 or args.negative_ratio < 1
             or not 0 <= args.match_threshold <= 1):
         parser.error("Invalid association distance, loss alpha, negative ratio or match threshold")
+    if (min(args.yolox_train_epochs, args.yolox_train_batch_size, args.yolox_train_accumulation,
+            args.yolox_train_frame_stride, args.yolox_width, args.yolox_height) < 1
+            or not 0 < args.yolox_train_fraction <= 1
+            or not 0 < args.yolox_train_lr < float("inf")
+            or not 0 < args.yolox_train_backbone_lr < float("inf")
+            or not 0 <= args.yolox_train_weight_decay < float("inf")
+            or not 0 < args.yolox_train_score < 1
+            or not 0 <= args.yolox_train_min_precision <= 1
+            or not 0 <= args.yolox_train_min_recall <= 1
+            or not 0 <= args.yolox_cache_min_score <= 1
+            or not 0 < args.yolox_nms_iou <= 1):
+        parser.error("Invalid YOLOX fine-tuning or cache settings")
     if args.encoder != "config":
         config.ENCODER_NAME, config.FEATURE_DIM = ENCODERS[args.encoder]
         config.FREEZE_ENCODER = True
@@ -107,6 +160,7 @@ def main(argv=None):
     config.LOSS_ALPHA = args.loss_alpha
     config.NEGATIVE_RATIO = args.negative_ratio
     config.MATCH_THRESHOLD = args.match_threshold
+    config.DEVICE = args.device
     config.RESUME_TRAINING = args.resume
     config.TEST_SEQUENCES = []
     config.RUN_SPLIT_TRACKING = False
@@ -119,6 +173,40 @@ def main(argv=None):
         for output in outputs.values():
             if any((output / name).exists() for name in ("model.pt", "last.pt", "history.csv")):
                 parser.error(f"Training files already exist in {output}; use --resume or a new output directory")
+    if "yolox" in args.detectors:
+        args.yolox_cache_dir = (args.yolox_cache_dir or
+            (args.output_dir / "yolox_cache" if args.train_yolox or args.make_yolox_cache
+             else PROJECT / "detections/yolox_x_mot20_val_v1")).resolve()
+        if args.train_yolox:
+            detector_dir = (args.yolox_train_output_dir or
+                            args.output_dir / "yolox_detector").resolve()
+            call_script("detector-train-yolox.py", [
+                "--output-dir", str(detector_dir), "--epochs", str(args.yolox_train_epochs),
+                "--width", str(args.yolox_width), "--height", str(args.yolox_height),
+                "--batch-size", str(args.yolox_train_batch_size),
+                "--accumulation", str(args.yolox_train_accumulation),
+                "--lr", str(args.yolox_train_lr),
+                "--backbone-lr", str(args.yolox_train_backbone_lr),
+                "--weight-decay", str(args.yolox_train_weight_decay),
+                "--score", str(args.yolox_train_score),
+                "--min-precision", str(args.yolox_train_min_precision),
+                "--min-recall", str(args.yolox_train_min_recall),
+                "--train-fraction", str(args.yolox_train_fraction),
+                "--frame-stride", str(args.yolox_train_frame_stride),
+                "--device", args.device])
+            args.yolox_checkpoint = detector_dir / "best.pth"
+        if args.yolox_checkpoint is not None:
+            args.yolox_checkpoint = args.yolox_checkpoint.resolve()
+            if not args.yolox_checkpoint.is_file():
+                parser.error(f"Missing YOLOX checkpoint: {args.yolox_checkpoint}")
+        if args.make_yolox_cache or args.train_yolox:
+            export_args = ["--split", "all", "--cache-dir", str(args.yolox_cache_dir),
+                           "--width", str(args.yolox_width), "--height", str(args.yolox_height),
+                           "--min-score", str(args.yolox_cache_min_score),
+                           "--nms-iou", str(args.yolox_nms_iou), "--device", args.device]
+            if args.yolox_checkpoint is not None:
+                export_args += ["--checkpoint", str(args.yolox_checkpoint)]
+            call_script("detect-yolox.py", export_args)
     results = {}
     for detector in args.detectors:
         output = outputs[detector]
