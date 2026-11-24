@@ -161,8 +161,39 @@ def make_evaluation_video(sequence=None, split=None, *, overall=None):
     return output
 
 
+def associate_frame(model, track_boxes, boxes, track_features, features, scores,
+                    image_size, *, use_graph=True, recovery_high=None):
+    """Normal matching or high-first matching followed by low-score recovery.
+
+    Recovery cannot create new tracks. Uses the same model/gate/assignment in
+    both passes; ByteTrack-inspired, not an implementation of ByteTrack itself.
+    """
+    def match(track_rows, detection_rows):
+        graph = build_graph(track_boxes[track_rows], boxes[detection_rows],
+                            track_features[track_rows], features[detection_rows], image_size)
+        output = model(graph, use_graph=use_graph)
+        pairs, ut, ud = match_tracks(output['scores'], output['mask'],
+                                    output['unmatched_track_scores'],
+                                    output['unmatched_detection_scores'], config.MATCH_THRESHOLD)
+        return ([(int(track_rows[t]), int(detection_rows[d])) for t, d in pairs],
+                [int(track_rows[t]) for t in ut], [int(detection_rows[d]) for d in ud], output)
+    tracks = np.arange(len(track_boxes))
+    detections = np.arange(len(boxes))
+    if recovery_high is None:
+        return match(tracks, detections)
+    if not 0 < recovery_high <= 1:
+        raise ValueError('recovery_high must be in (0,1]')
+    high = detections[np.asarray(scores) >= recovery_high]
+    low = detections[np.asarray(scores) < recovery_high]
+    pairs, unmatched, births, first = match(tracks, high)
+    second_pairs, unmatched, _, second = match(np.asarray(unmatched, dtype=int), low)
+    first['marginal_error'] = torch.maximum(first['marginal_error'], second['marginal_error'])
+    first['normalization_error'] = torch.maximum(first['normalization_error'], second['normalization_error'])
+    return pairs + second_pairs, unmatched, births, first
+
+
 @torch.no_grad()
-def run_sequence(sequence, model, encoder, split=None, *, overall=None, use_graph=True):
+def run_sequence(sequence, model, encoder, split=None, *, overall=None, use_graph=True, recovery_high=None, recovery_low=None):
     """Track one selected sequence, save MOT rows/preview, and report timing.
 
     Expire tracks before association if the gap already contains more than
@@ -181,7 +212,8 @@ def run_sequence(sequence, model, encoder, split=None, *, overall=None, use_grap
     tqdm.write(f"{sequence} {context['split']}: frames {frame_range[0]}..{frame_range[1]}")
     resolved_detections = detection_path(sequence_path)
     frames = load_sequence(sequence_path, resolved_detections, frame_range,
-                           box_origin=config.BOX_ORIGIN, min_score=config.DETECTION_MIN_SCORE)
+                           box_origin=config.BOX_ORIGIN,
+                           min_score=config.DETECTION_MIN_SCORE if recovery_low is None else recovery_low)
     model.eval()
     encoder.eval()
     tracks, next_id, row_count, max_error = [], 1, 0, 0.0
@@ -206,15 +238,12 @@ def run_sequence(sequence, model, encoder, split=None, *, overall=None, use_grap
                 track_boxes = predict_track_boxes(tracks, frame_id)
                 track_features = (torch.stack([track["feature"] for track in tracks]) if tracks
                                   else torch.empty((0, encoder.feature_dim)))
-                graph = build_graph(track_boxes, current["boxes"], track_features, features,
-                                    image_size=(frame["height"], frame["width"]))
-                output = model(graph, use_graph=use_graph)
+                matches, unmatched_tracks, unmatched_detections, output = associate_frame(
+                    model, track_boxes, current['boxes'], track_features, features, current['scores'],
+                    (frame['height'], frame['width']), use_graph=use_graph, recovery_high=recovery_high)
                 error = output["marginal_error"].item()
                 max_error = max(max_error, error)
                 max_normalization_error = max(max_normalization_error, output["normalization_error"].item())
-                matches, unmatched_tracks, unmatched_detections = match_tracks(
-                    output["scores"], output["mask"], output["unmatched_track_scores"],
-                    output["unmatched_detection_scores"], config.MATCH_THRESHOLD)
                 previous_id = next_id
                 tracks, next_id, observations = update_tracks(
                     tracks, matches, unmatched_tracks, unmatched_detections, current, features, next_id)
@@ -256,6 +285,10 @@ def run_sequence(sequence, model, encoder, split=None, *, overall=None, use_grap
         "device": config.DEVICE,
         "method": "paper_inspired_attention" if use_graph else "raw_appearance_cosine",
         "use_graph": use_graph, "model_version": MODEL_VERSION,
+        "recovery_high": recovery_high,
+        "recovery_low": recovery_low,
+        "detection_read_score": config.DETECTION_MIN_SCORE if recovery_low is None else recovery_low,
+        "recovery_method": 'high_then_low_no_low_births' if recovery_high is not None else 'single_pass',
         "assignment": "negative_log_scores_with_track_and_detection_unmatched_costs",
         "tracker_settings": settings,
         "timing": "frame loop including image reads and output; excludes model/metadata loading, final preview and video",
@@ -268,9 +301,11 @@ def run_sequence(sequence, model, encoder, split=None, *, overall=None, use_grap
     return summary
 
 
-def main(*, use_graph=True):
+def main(*, use_graph=True, recovery_high=None, recovery_low=None):
     """Load graph and appearance weights from one compatible checkpoint; track clips."""
     tracker_settings()
+    if recovery_low is not None and (recovery_high is None or not 0 <= recovery_low < recovery_high <= 1):
+        raise ValueError('Recovery requires 0 <= recovery_low < recovery_high <= 1')
     if config.MATCH_THRESHOLD is None or not 0 <= config.MATCH_THRESHOLD <= 1:
         raise ValueError("Set MATCH_THRESHOLD between 0 and 1, then tune it on validation")
     if not isinstance(config.MAX_MISSED_FRAMES, int) or config.MAX_MISSED_FRAMES < 0:
@@ -341,7 +376,8 @@ def main(*, use_graph=True):
             overall.set_postfix(video=f"{index}/{len(jobs)}", split=split,
                                 sequence=sequence, refresh=False)
             summaries.append(run_sequence(sequence, model, encoder, split=split, overall=overall,
-                                          use_graph=use_graph))
+                                          use_graph=use_graph, recovery_high=recovery_high,
+                                          recovery_low=recovery_low))
     return summaries
 
 

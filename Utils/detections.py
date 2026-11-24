@@ -10,6 +10,11 @@ from Utils.data import _sequence_info
 
 def detector_settings():
     """Recipe for cache compatibility; device is not part of the recipe."""
+    if config.DETECTION_BACKEND == 'cached':
+        recipe = getattr(config, 'CACHED_DETECTOR_RECIPE', None)
+        if not isinstance(recipe, dict) or recipe.get('format') != 'mot_person_v1':
+            raise ValueError('Set CACHED_DETECTOR_RECIPE from the detector export manifest')
+        return recipe.copy()
     if not 0 <= config.DETECTOR_MIN_SCORE <= 1:
         raise ValueError("DETECTOR_MIN_SCORE must be between 0 and 1")
     mode = config.DETECTOR_INPUT_MODE
@@ -52,10 +57,10 @@ def detection_settings():
         source = {"archive_sha256": config.TRACKTOR_ARCHIVE_SHA256,
                   "recipe": "tracktor_prepr_det", "upstream_ids": "discarded",
                   "missing_confidence": "minus_one_to_one", "box_origin": 1}
-    elif config.DETECTION_BACKEND == "rtdetrv2":
+    elif config.DETECTION_BACKEND in ("rtdetrv2", "cached"):
         source = detector_settings()
     else:
-        raise ValueError("DETECTION_BACKEND must be supplied, tracktor, or rtdetrv2")
+        raise ValueError("DETECTION_BACKEND must be supplied, tracktor, rtdetrv2, or cached")
     return {"backend": config.DETECTION_BACKEND, "source": source,
             "box_origin": config.BOX_ORIGIN, "read_min_score": config.DETECTION_MIN_SCORE}
 
@@ -103,7 +108,7 @@ def detection_path(sequence_path):
     detection_settings()  # Validate the selected backend even before loading a model.
     if config.DETECTION_BACKEND == "tracktor":
         return validate_tracktor(sequence_path)
-    if config.DETECTION_BACKEND == "rtdetrv2":
+    if config.DETECTION_BACKEND in ("rtdetrv2", "cached"):
         return validate_cache(sequence_path)
     path = Path(config.DETECTION_FILE)
     path = path if path.is_absolute() else Path(sequence_path) / path

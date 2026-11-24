@@ -36,7 +36,7 @@ def resolve_source(sequence_path, backend):
     if backend == "tracktor":
         path = validate_tracktor(sequence_path)
         metadata = json.loads(path.with_name("summary.json").read_text())
-    elif backend in ("rtdetrv2", "ddq", "yolox"):
+    elif backend in ("rtdetrv2", "ddq", "yolox", "cached"):
         if config.BOX_ORIGIN != 1:
             raise ValueError("Generated detector caches use MOT's BOX_ORIGIN=1")
         path = cache_path(sequence_path).resolve()
@@ -49,6 +49,7 @@ def resolve_source(sequence_path, backend):
                 or recipe.get("format") != "mot_person_v1" or recipe.get("box_origin") != 1
                 or (backend in ("ddq", "yolox") and recipe.get("backend") != backend)
                 or (backend == "rtdetrv2" and recipe.get("backend", "rtdetrv2") != "rtdetrv2")
+                or (backend == "cached" and recipe.get("backend") not in ('yolo26', 'rfdetr'))
                 or metadata.get("sha256") != file_digest(path)):
             raise ValueError(f"Incomplete, changed, or incompatible detection cache: {path}")
     else:
@@ -157,8 +158,8 @@ def write_reports(output_dir, rows, provenance, args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--backend", choices=("supplied", "tracktor", "rtdetrv2", "ddq", "yolox"), default=config.DETECTION_BACKEND)
-    parser.add_argument("--cache-dir", type=Path, help="RT-DETR, DDQ or YOLOX cache directory; reads its recorded recipe")
+    parser.add_argument("--backend", choices=("supplied", "tracktor", "rtdetrv2", "ddq", "yolox", "cached"), default=config.DETECTION_BACKEND)
+    parser.add_argument("--cache-dir", type=Path, help="RT-DETR, DDQ, YOLOX or detector-suite cache directory; reads its recorded recipe")
     parser.add_argument("--split", choices=("train", "val"), default="val", help="Use val when tuning")
     parser.add_argument("--scores", type=float, nargs="+", default=[0.1, 0.2, 0.3, 0.5, 0.7],
                         help="Explicit confidence sweep; all cached boxes are always also evaluated")
@@ -171,11 +172,11 @@ def main():
     if args.max_frames is not None and args.max_frames < 1:
         parser.error("--max-frames must be positive")
     if args.cache_dir is not None:
-        if args.backend not in ("rtdetrv2", "ddq", "yolox"):
-            parser.error("--cache-dir is for --backend rtdetrv2, ddq or yolox")
+        if args.backend not in ("rtdetrv2", "ddq", "yolox", "cached"):
+            parser.error("--cache-dir is for --backend rtdetrv2, ddq, yolox or cached")
         config.DETECTION_CACHE_DIR = args.cache_dir
-    if args.backend in ("ddq", "yolox") and args.cache_dir is None:
-        parser.error("--backend ddq/yolox requires its explicit --cache-dir")
+    if args.backend in ("ddq", "yolox", "cached") and args.cache_dir is None:
+        parser.error("--backend ddq/yolox/cached requires its explicit --cache-dir")
     args.scores, args.ious = sorted(set(args.scores)), sorted(set(args.ious))
     validate_video_splits()
     sequences = config.VAL_SEQUENCES if args.split == "val" else config.TRAIN_SEQUENCES
