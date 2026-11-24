@@ -271,3 +271,21 @@ With `SHOW_PROGRESS=True`, `tqdm` shows an overall bar above the detailed bar:
 - **Evaluation overall:** all videos scored by TrackEval; updates after each video's HOTA, CLEAR, and Identity metrics finish. ETA becomes available after the first completed video. Input preparation retains its separate bar.
 
 ETAs use the average observed processing rate and can change with video crowding and training/validation speed. The overall bars start after dataset/model setup; evaluation report writing and final output cleanup are not separate counted work units. `SHOW_PROGRESS=False` hides both overall and detailed bars.
+
+## CrowdHuman + MOT20 YOLOX-X detector
+
+Use `python detect-yolox.py --smoke-test` for one real frame, then
+`python detect-yolox.py --split val --cache-dir detections/yolox_x_mot20_val_v1`.
+Evaluate with `python evaluate_detector.py --backend yolox --cache-dir detections/yolox_x_mot20_val_v1`.
+See [YOLOX setup, testing and evaluation](Documentation/Implementation/30-yolox-detector.md).
+
+Fine-tune YOLOX-X on the configured training videos with `python detector-train-yolox.py`.
+See [YOLOX training and validation](Documentation/Implementation/31-yolox-training.md).
+
+For a pretrained YOLOX + frozen OSNet tracking baseline without GCN, run
+`python track-yolox-osnet.py --smoke-test`, then `python track-yolox-osnet.py --evaluate`.
+See [YOLOX + OSNet tracking](Documentation/Implementation/32-yolox-osnet.md).
+
+To test OSNet identity fine-tuning without changing the detector, run `python osnet-train.py --lr 1e-5 --epochs 5`, then pass its `best.pt` with `track-yolox-osnet.py --osnet-checkpoint`. See [OSNet fine-tuning](Documentation/Implementation/34-osnet-finetuning.md).
+
+To isolate the detector change, run `python track-tracktor-osnet.py --detection-min-score 0.5 --new-track-min-score 0.7`, then `python evaluate-tracktor-osnet.py <printed-run-folder>`. See [matched Tracktor + OSNet comparison](Documentation/Implementation/33-tracktor-osnet-cosine.md).
