@@ -1,5 +1,7 @@
 # Four-day implementation TODO
 
+> Historical development checklist. Some temporary experiment commands described below were retired after the final comparison workflow was prepared. Use the [project README](../../README.md) for runnable commands and the [fixed comparison report](../FINAL_COMPARISON_BASELINES.md) for current readings.
+
 - [x] **Continue training from the last epoch — `Utils/training_resume.py`, `train.py`, `Utils/config.py`, `search.py`. Owner: Codex.** Restore weights/Adam/history/best loss, save random states and latest checkpoint each epoch, back up run files, protect search isolation. [Usage and functions](23-resume-training.md)
 - [ ] **Continue the residual run to epoch 40 and compare validation tracking. Owner: ___ .** Training is configured but has not been launched. [Resume guide](23-resume-training.md)
 

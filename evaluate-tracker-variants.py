@@ -9,7 +9,6 @@ project has no association checkpoint trained on the fine-tuned OSNet features.
 import argparse
 import csv
 from datetime import datetime
-import importlib.util
 import json
 from pathlib import Path
 import shutil
@@ -18,13 +17,12 @@ import tempfile
 import torch
 from tqdm.auto import tqdm
 
-from Utils import config
+from Utils import config, mot_metrics as diagnostic
 from Utils.data import load_ground_truth, load_image_frames, load_sequence, read_image
 from Utils.detections import file_digest, validate_tracktor
 from Utils.features import extract_features, load_encoder
 from Utils.outputs import tracking_context
 from Utils.yolox_osnet import cache_for_sequence as yolox_cache_for_sequence
-from encoder_experiment import configure
 from model import AssociationModel, MODEL_VERSION
 import tracking
 
@@ -39,12 +37,12 @@ DEFAULT_FINETUNED_OSNET=ROOT/'outputs/osnet_finetune/lr_1e-05/best.pt'
 VARIANTS=('frozen_osnet','finetuned_osnet','densenet')
 
 
-def load_diagnostic():
-    path=Path(__file__).with_name('diagnose-tracking.py')
-    spec=importlib.util.spec_from_file_location('tracking_diagnostic',path)
-    module=importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+def configure(encoder):
+    name,width={'densenet':('densenet121',1024),'reid':('osnet_reid',512)}[encoder]
+    config.ENCODER_NAME=name
+    config.FEATURE_DIM=width
+    config.FREEZE_ENCODER=True
+    config.USE_PRETRAINED_WEIGHTS=True
 
 
 def gt_cache(sequence_path,folder):
@@ -181,7 +179,6 @@ def main(argv=None):
             if not path.is_file():parser.error(f'Missing weights: {path}')
     if torch.device(args.device).type=='cuda' and not torch.cuda.is_available():
         parser.error('CUDA unavailable; choose --device cpu')
-    diagnostic=load_diagnostic()
     sequences=tuple(diagnostic.SEQUENCES)
     if any(sequence not in config.VAL_SEQUENCES for sequence in sequences):
         parser.error(f'This diagnostic requires {sequences} in config.VAL_SEQUENCES')
