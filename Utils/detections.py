@@ -51,7 +51,15 @@ def detector_settings():
 
 def detection_settings():
     """Record box source in the split/checkpoint metadata, preventing silent switches."""
-    if config.DETECTION_BACKEND == "supplied":
+    if config.DETECTION_BACKEND == "mapped":
+        files = getattr(config, "DETECTION_FILES", None)
+        if not isinstance(files, dict) or not files:
+            raise ValueError("DETECTION_FILES must map sequence names to detection files")
+        source = {"name": getattr(config, "MAPPED_DETECTION_SOURCE", "mapped"),
+                  "files": {name: {"path": str(Path(path).resolve()),
+                                   "sha256": file_digest(path)}
+                            for name, path in sorted(files.items())}}
+    elif config.DETECTION_BACKEND == "supplied":
         source = {"file": str(config.DETECTION_FILE)}
     elif config.DETECTION_BACKEND == "tracktor":
         source = {"archive_sha256": config.TRACKTOR_ARCHIVE_SHA256,
@@ -60,7 +68,7 @@ def detection_settings():
     elif config.DETECTION_BACKEND in ("rtdetrv2", "cached"):
         source = detector_settings()
     else:
-        raise ValueError("DETECTION_BACKEND must be supplied, tracktor, rtdetrv2, or cached")
+        raise ValueError("DETECTION_BACKEND must be mapped, supplied, tracktor, rtdetrv2, or cached")
     return {"backend": config.DETECTION_BACKEND, "source": source,
             "box_origin": config.BOX_ORIGIN, "read_min_score": config.DETECTION_MIN_SCORE}
 
@@ -106,6 +114,15 @@ def validate_cache(sequence_path):
 def detection_path(sequence_path):
     """Shared entry point for training and tracking; never fall back silently."""
     detection_settings()  # Validate the selected backend even before loading a model.
+    if config.DETECTION_BACKEND == "mapped":
+        sequence = Path(sequence_path).name
+        files = config.DETECTION_FILES
+        if sequence not in files:
+            raise ValueError(f"No mapped detection file for {sequence}")
+        path = Path(files[sequence]).resolve()
+        if not path.is_file():
+            raise FileNotFoundError(path)
+        return path
     if config.DETECTION_BACKEND == "tracktor":
         return validate_tracktor(sequence_path)
     if config.DETECTION_BACKEND in ("rtdetrv2", "cached"):

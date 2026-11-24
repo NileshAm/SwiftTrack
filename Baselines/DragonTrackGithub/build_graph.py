@@ -200,7 +200,7 @@ def build_graph(tracklets, current_detections, images_path, current_frame, dista
 
             xmin, ymin, width, height = int(round(tracklet1[2])), int(round(tracklet1[3])), \
                                         int(round(tracklet1[4])), int(round(tracklet1[5]))
-            print(xmin, ymin, width, height)
+            # print(xmin, ymin, width, height)
             image_name = os.path.join(images_path, "{0:0=6d}".format(int(tracklet1[0])) + ".jpg")
             image = plt.imread(image_name)
             frame_width, frame_height, channels = image.shape

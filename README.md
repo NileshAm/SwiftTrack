@@ -47,3 +47,5 @@ python Baselines/DragonTrackGithub/evaluate.py outputs/github_dragontrack/baseli
 These commands are prepared but have not been run here. Replace `epoch_20.pth` with the checkpoint you want to compare. See the baseline README for the pinned source version, required runtime corrections, and output interpretation.
 
 The older step-by-step implementation notes are in [Documentation/Implementation](Documentation/Implementation/README.md). They describe development history; some retired experiment commands in those notes were removed from the active repository.
+
+For independent train, inference and evaluation commands for **our implementation**, see [Baselines/OurImplementation/README.md](Baselines/OurImplementation/README.md). This supports the same GT, Tracktor and YOLOX box comparison as the authors' baseline while recording the checkpoint and detector used for every run.
