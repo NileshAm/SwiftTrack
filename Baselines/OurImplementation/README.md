@@ -45,6 +45,8 @@ python Baselines/OurImplementation/evaluate.py outputs/our_implementation/iter_f
 
 `--iter-checkpoint` is required for Iter inference so the cache's model hash can be checked. The inference manifest records that hash, the cache path and resolution. The evaluator picks up Iter from the manifest without a separate detector flag.
 
+To train the association network on **newly fine-tuned OSNet features**, add `--finetuned-osnet-weights /path/to/osnet/best.pt` to the Iter training command. This records the OSNet checkpoint hash in the association checkpoint; inference then reloads the same OSNet weights automatically. The `final-train.py` runner performs detector training, OSNet training, cache export, association training, tracking, and evaluation together in `final-ouput/`.
+
 To compare Iter boxes with an **existing** OSNet association checkpoint, skip association training and pass that checkpoint to `infer.py`. For example, use `--checkpoint outputs/encoder_comparison_reid_v1/model.pt --detectors iter --iter-checkpoint outputs/itere2edet_mot17_finetune_v1/best.pth --iter-cache-dir detections/iter_e2edet_mot17_finetuned_v1 --graph off --detection-min-score 0.4 --new-track-min-score 0.7 --output-dir outputs/our_implementation/iter_existing_osnet_val`, then run `evaluate.py` on that output directory. The detector checkpoint must be the one that produced the selected cache.
 
 To fine-tune YOLOX, export detections from its best checkpoint, then train our association model on those detections:

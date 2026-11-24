@@ -52,6 +52,7 @@ def main(argv=None):
     parser.add_argument("--graph-jump", type=int, default=5)
     parser.add_argument("--distance-limit", type=float, default=250)
     parser.add_argument("--checkpoint", type=Path, help="Authors-format epoch_N.pth to resume")
+    parser.add_argument("--resume", action="store_true", help="Resume latest completed epoch in the same output folder")
     parser.add_argument("--output-dir", type=Path)
     args = parser.parse_args(argv)
     if min(args.epochs, args.batch_size, args.lookback, args.graph_jump) <= 0 or args.distance_limit <= 0:
@@ -62,12 +63,18 @@ def main(argv=None):
         parser.error("The authors' released model requires CUDA; activate the GPU-enabled dragon-track environment")
     root = config.DATASET_ROOT / config.DATASET_SPLIT
     output = args.output_dir or PROJECT / "outputs/github_dragontrack" / datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    if output.exists():
+    if output.exists() and not args.resume:
         raise FileExistsError(f"Choose a fresh output directory: {output}")
-    output.mkdir(parents=True)
-    (output / "models_v3").mkdir()
-    (output / "logfiles").mkdir()
-    checkpoint = args.checkpoint.resolve() if args.checkpoint else None
+    output.mkdir(parents=True, exist_ok=True)
+    (output / "models_v3").mkdir(exist_ok=True)
+    (output / "logfiles").mkdir(exist_ok=True)
+    checkpoints = sorted((output / "models_v3").glob("epoch_*.pth"),
+                         key=lambda path: int(path.stem.split("_")[-1]))
+    checkpoint = args.checkpoint.resolve() if args.checkpoint else (checkpoints[-1] if args.resume and checkpoints else None)
+    if args.resume and args.checkpoint is None and not checkpoints:
+        raise FileNotFoundError("No completed authors' epoch to resume")
+    if args.resume and checkpoint is not None and checkpoint.parent != (output / "models_v3").resolve():
+        raise ValueError("Resume checkpoint must belong to this output folder")
     (output / "settings.json").write_text(json.dumps({
         "upstream_commit": UPSTREAM_COMMIT,
         "train_sequences": args.train_sequences, "val_sequences": args.val_sequences,

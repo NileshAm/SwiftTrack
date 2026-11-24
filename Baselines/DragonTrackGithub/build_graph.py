@@ -219,7 +219,7 @@ def build_graph(tracklets, current_detections, images_path, current_frame, dista
         for detection in current_detections:
             xmin, ymin, width, height = int(round(detection[2])), int(round(detection[3])), \
                                         int(round(detection[4])), int(round(detection[5]))
-            print(xmin, ymin, width, height)
+            # print(xmin, ymin, width, height)
 #             next_det = find_next_frame_detection(detection, next_frame_detections)
 #             if next_det is not None and len(next_det) > 0:
 #                 next_xmin, next_ymin, next_width, next_height = map(int, map(round, [next_det[2], next_det[3], next_det[4], next_det[5]]))

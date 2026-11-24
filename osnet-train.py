@@ -164,7 +164,16 @@ def main(argv=None):
     last=out/'last.pt'
     saved=torch.load(last,map_location='cpu',weights_only=True) if last.exists() else None
     if saved and saved['recipe']!=recipe:raise ValueError('Settings or data changed; choose a new output directory')
-    if saved and not (out/'best.pt').is_file():raise FileNotFoundError('Missing best.pt for this resumed run')
+    if saved:
+        best_path=out/'best.pt'
+        selected=torch.load(best_path,map_location='cpu',weights_only=True) if best_path.is_file() else None
+        current=saved['history'][-1]
+        current_key=(current['val_triplet_accuracy'],-current['val_loss'])
+        if current_key==tuple(saved['best_key']) and (selected is None or
+                tuple(selected['best_key'])<tuple(saved['best_key'])):
+            save(saved,best_path)  # Interrupted between latest and best writes.
+        elif selected is None:
+            raise FileNotFoundError('Missing best.pt for this resumed run')
     if not saved and any(out.iterdir()):raise FileExistsError('Output is not empty; choose another --output-dir')
     history=[];best_key=(-1.,float('-inf'));start=0
     if saved:

@@ -18,7 +18,7 @@ sys.path.insert(0, str(PROJECT))
 
 from Utils import config  # noqa: E402
 from Utils.benchmark_boxes import gt_person_cache  # noqa: E402
-from Utils.detections import file_digest, validate_tracktor  # noqa: E402
+from Utils.detections import file_digest, validate_tracktor, validate_cache  # noqa: E402
 from Utils.features import load_encoder  # noqa: E402
 from Utils.splits import validate_video_splits  # noqa: E402
 from Utils.yolox_osnet import (cache_for_sequence as validate_yolox,
@@ -49,6 +49,8 @@ def restore_model_settings(checkpoint):
         setattr(config, name, settings[name])
     if "REID_WEIGHTS_PATH" in settings:
         config.REID_WEIGHTS_PATH = Path(settings["REID_WEIGHTS_PATH"])
+    tuned_path = settings.get("FINETUNED_OSNET_WEIGHTS_PATH")
+    config.FINETUNED_OSNET_WEIGHTS_PATH = Path(tuned_path) if tuned_path else None
     split = checkpoint["data_split"]
     if split.get("protocol") != "whole_video_v1":
         raise ValueError("Checkpoint does not record a disjoint whole-video split")
@@ -72,13 +74,18 @@ def load_models(checkpoint, device, osnet_weights):
     model = AssociationModel(**checkpoint["model_settings"]).to(device)
     model.load_state_dict(checkpoint["model_state_dict"], strict=True)
     model.eval()
+    trained_tuned_hash = checkpoint["feature_settings"].get("fine_tuned_checkpoint_sha256")
+    if trained_tuned_hash and osnet_weights is not None:
+        if file_digest(osnet_weights) != trained_tuned_hash:
+            raise ValueError("Supplied OSNet weights differ from those used for association training")
+        config.FINETUNED_OSNET_WEIGHTS_PATH = osnet_weights
     encoder = load_encoder(device)
     if checkpoint.get("encoder_state_dict") is not None:
         encoder.load_state_dict(checkpoint["encoder_state_dict"], strict=True)
     if encoder.feature_settings != checkpoint["feature_settings"]:
         raise ValueError("Pretrained encoder weights or preprocessing differ from the checkpoint")
     transfer = None
-    if osnet_weights is not None:
+    if osnet_weights is not None and not trained_tuned_hash:
         if config.ENCODER_NAME != "osnet_reid":
             raise ValueError("--finetuned-osnet-weights needs an OSNet association checkpoint")
         saved = torch.load(osnet_weights, map_location="cpu", weights_only=True)
@@ -106,6 +113,8 @@ def source_file(detector, sequence_path, args, output):
     if detector == "iter":
         cache, _ = validate_iter(args.iter_cache_dir, sequence_path, args.iter_checkpoint)
         return cache
+    if detector == "rtdetr":
+        return validate_cache(sequence_path)
     if args.yolox_checkpoint is None:
         cache, _ = validate_yolox(args.yolox_cache_dir, sequence_path)
     else:
@@ -118,9 +127,13 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", type=Path, required=True,
                         help="model.pt or last.pt from our association trainer")
-    parser.add_argument("--detectors", nargs="+", choices=("gt", "tracktor", "yolox", "iter"),
+    parser.add_argument("--detectors", nargs="+", choices=("gt", "tracktor", "yolox", "iter", "rtdetr"),
                         default=("gt", "tracktor", "yolox"))
     parser.add_argument("--tracktor-cache-dir", type=Path, default=config.TRACKTOR_CACHE_DIR)
+    parser.add_argument("--rtdetr-cache-dir", type=Path)
+    parser.add_argument("--rtdetr-weights-dir", type=Path)
+    parser.add_argument("--rtdetr-image-size", type=int, default=960)
+    parser.add_argument("--rtdetr-cache-min-score", type=float, default=0.05)
     parser.add_argument("--yolox-cache-dir", type=Path,
                         default=PROJECT / "detections/yolox_x_mot20_val_v1")
     parser.add_argument("--yolox-checkpoint", type=Path,
@@ -149,6 +162,8 @@ def main(argv=None):
         parser.error("--detectors iter requires --iter-checkpoint to verify cache provenance")
     if args.iter_checkpoint is not None and "iter" not in args.detectors:
         parser.error("--iter-checkpoint requires --detectors iter")
+    if "rtdetr" in args.detectors and args.rtdetr_cache_dir is None:
+        parser.error("--detectors rtdetr requires --rtdetr-cache-dir")
     if args.iter_short_side < 32 or args.iter_max_size < args.iter_short_side:
         parser.error("Invalid Iter inference resolution")
     if any(not 0 <= value <= 1 for value in
@@ -164,6 +179,9 @@ def main(argv=None):
     if checkpoint.get("model_version") != MODEL_VERSION:
         parser.error("Checkpoint model version differs from the current implementation")
     restore_model_settings(checkpoint)
+    trained_graph = checkpoint["settings"].get("TRAIN_USE_GRAPH")
+    if trained_graph is not None and trained_graph != (args.graph == "on"):
+        parser.error("--graph must match the graph setting used to train this checkpoint")
     config.CHECKPOINT_PATH = checkpoint_path
     config.DEVICE = args.device
     config.MATCH_THRESHOLD = (args.match_threshold if args.match_threshold is not None
@@ -171,6 +189,15 @@ def main(argv=None):
     config.DETECTION_MIN_SCORE = args.detection_min_score
     config.NEW_TRACK_MIN_SCORE = args.new_track_min_score
     config.TRACKTOR_CACHE_DIR = args.tracktor_cache_dir.resolve()
+    if "rtdetr" in args.detectors:
+        if args.rtdetr_image_size < 32 or args.rtdetr_image_size % 32 or not 0 <= args.rtdetr_cache_min_score <= 1:
+            parser.error("Invalid RT-DETR cache settings")
+        config.DETECTION_BACKEND = "rtdetrv2"
+        config.DETECTION_CACHE_DIR = args.rtdetr_cache_dir.resolve()
+        config.DETECTOR_WEIGHTS_DIR = args.rtdetr_weights_dir.resolve() if args.rtdetr_weights_dir else None
+        config.DETECTOR_INPUT_MODE = "square"
+        config.DETECTOR_IMAGE_SIZE = args.rtdetr_image_size
+        config.DETECTOR_MIN_SCORE = args.rtdetr_cache_min_score
     if args.confirm_min_hits is not None:
         config.TRACK_CONFIRM_MIN_HITS = args.confirm_min_hits
     osnet_weights = args.finetuned_osnet_weights.resolve() if args.finetuned_osnet_weights else None
@@ -194,7 +221,7 @@ def main(argv=None):
         for sequence in config.VAL_SEQUENCES:
             sequence_path = config.DATASET_ROOT / config.DATASET_SPLIT / sequence
             path = source_file(detector, sequence_path, args, output)
-            if detector in ("yolox", "iter"):
+            if detector in ("yolox", "iter", "rtdetr"):
                 summary = json.loads(path.with_name("summary.json").read_text())
                 recipe = summary["identity"]["detector"]
                 cache_floor = recipe["min_score"]
@@ -229,6 +256,8 @@ def main(argv=None):
         "iter_checkpoint_sha256": file_digest(args.iter_checkpoint) if args.iter_checkpoint else None,
         "iter_cache_dir": str(args.iter_cache_dir.resolve()) if "iter" in args.detectors else None,
         "iter_resolution": [args.iter_short_side, args.iter_max_size] if "iter" in args.detectors else None,
+        "rtdetr_cache_dir": str(args.rtdetr_cache_dir.resolve()) if "rtdetr" in args.detectors else None,
+        "rtdetr_weights_dir": str(args.rtdetr_weights_dir.resolve()) if args.rtdetr_weights_dir else None,
         "detection_min_score": args.detection_min_score,
         "new_track_min_score": args.new_track_min_score,
         "match_threshold": config.MATCH_THRESHOLD,

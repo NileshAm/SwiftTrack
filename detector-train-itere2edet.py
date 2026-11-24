@@ -212,6 +212,13 @@ def main(argv=None):
                     state[key] = value.to(args.device)
         start_epoch, best_f1 = saved["epoch"]+1, saved["best_f1"]
         history = saved["history"]
+        selected = history[-1]
+        published = torch.load(best, map_location="cpu", weights_only=False) if best.is_file() else None
+        if published is None or selected["f1"] > published["selected"]["f1"]:
+            if selected["f1"] != best_f1:
+                raise ValueError("Missing selected best checkpoint; restore this run before resuming")
+            save_checkpoint(best, {"model": saved["model"], "epoch": saved["epoch"],
+                                   "selected": selected, "recipe": recipe})
     else:
         DetectionCheckpointer(model).load(str(args.checkpoint.resolve()))
         start_epoch, best_f1, history = 1, -1.0, []
@@ -229,13 +236,15 @@ def main(argv=None):
             selected = {"epoch": epoch, "train_loss": loss, **selected}
             history.append(selected)
             (root/f"validation_epoch_{epoch}.json").write_text(json.dumps(rows, indent=2)+"\n")
-            if selected["f1"] > best_f1:
+            improved = selected["f1"] > best_f1
+            if improved:
                 best_f1 = selected["f1"]
-                save_checkpoint(best, {"model": model.state_dict(), "epoch": epoch,
-                                       "selected": selected, "recipe": recipe})
             save_checkpoint(latest, {"model": model.state_dict(), "optimizer": optimizer.state_dict(),
                                      "epoch": epoch, "best_f1": best_f1, "history": history,
                                      "recipe": recipe})
+            if improved:
+                save_checkpoint(best, {"model": model.state_dict(), "epoch": epoch,
+                                       "selected": selected, "recipe": recipe})
             (root/"history.json").write_text(json.dumps(history, indent=2)+"\n")
             tqdm.write(f"Epoch {epoch}: train loss {loss:.4f}, validation F1 {selected['f1']:.4f} "
                        f"at score {selected['score']:.2f}; best F1 {best_f1:.4f}")

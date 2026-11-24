@@ -3,6 +3,8 @@
 Uses the official Torchreid architecture without importing its training toolkit.
 Geometry and position remain box-derived; OSNet supplies appearance only.
 """
+from pathlib import Path
+
 import torch
 from torch import nn
 from torchvision import transforms
@@ -41,6 +43,17 @@ def load_reid_encoder(device):
         raise ValueError("Expected the official OSNet classification checkpoint")
     network = osnet_x1_0(num_classes=state["classifier.weight"].shape[0], pretrained=False)
     network.load_state_dict(state, strict=True)
+    tuned_path = getattr(config, "FINETUNED_OSNET_WEIGHTS_PATH", None)
+    tuned = None
+    if tuned_path is not None:
+        tuned_path = Path(tuned_path)
+        if not tuned_path.is_file():
+            raise FileNotFoundError(f"Missing fine-tuned OSNet checkpoint: {tuned_path}")
+        tuned = torch.load(tuned_path, map_location="cpu", weights_only=True)
+        if (tuned.get("recipe", {}).get("version") != "mot_osnet_triplet_v1"
+                or tuned["recipe"].get("base_features", {}).get("weights_sha256") != file_digest(path)):
+            raise ValueError("Fine-tuned OSNet checkpoint is incompatible with the official base weights")
+        network.load_state_dict(tuned["encoder_state_dict"], strict=True)
     encoder = ReIDEncoder(network).requires_grad_(False).eval().to(device)
     torch.backends.cudnn.allow_tf32 = False
     torch.backends.cuda.matmul.allow_tf32 = False
@@ -60,4 +73,9 @@ def load_reid_encoder(device):
         "pooling": "global_average_fc_l2", "frozen": True,
         "precision": "float32_tf32_disabled",
     }
+    if tuned is not None:
+        encoder.feature_settings.update({
+            "fine_tuned_checkpoint_sha256": file_digest(tuned_path),
+            "fine_tuned_epoch": tuned["epoch"],
+        })
     return encoder

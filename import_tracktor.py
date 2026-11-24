@@ -20,7 +20,8 @@ from Utils.detections import file_digest, tracktor_path, tracktor_identity, vali
 def import_sequence(archive, sequence_path):
     sequence_path = Path(sequence_path)
     path = tracktor_path(sequence_path)
-    if path.exists() or path.with_name('summary.json').exists():
+    summary_path = path.with_name('summary.json')
+    if summary_path.exists():
         return validate_tracktor(sequence_path)
     identity = tracktor_identity(sequence_path)
     member = f'MOT17Labels/{sequence_path.parent.name}/{sequence_path.name}/det/tracktor_prepr_det.txt'
@@ -43,24 +44,34 @@ def import_sequence(archive, sequence_path):
             rows.append(values)
     rows.sort(key=lambda row: row[0])
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open('x', newline='') as stream:
+    pending = path.with_name('det.txt.partial')
+    with pending.open('w', newline='') as stream:
         writer = csv.writer(stream)
         writer.writerows(rows)
+    pending.replace(path)
     summary = {'complete': True, 'identity': identity, 'source_member': member,
                'rows': len(rows), 'sha256': file_digest(path)}
-    path.with_name('summary.json').write_text(json.dumps(summary, indent=2)+'\n')
+    pending_summary = path.with_name('summary.json.partial')
+    pending_summary.write_text(json.dumps(summary, indent=2)+'\n')
+    pending_summary.replace(summary_path)
     return path
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--archive', type=Path, default=config.TRACKTOR_ARCHIVE)
+    parser.add_argument('--cache-dir', type=Path, help='Fresh destination for imported Tracktor boxes')
+    parser.add_argument('--train-val-only', action='store_true',
+                        help='Import only configured training and validation videos')
     args = parser.parse_args()
+    if args.cache_dir is not None:
+        config.TRACKTOR_CACHE_DIR = args.cache_dir.resolve()
     if file_digest(args.archive) != config.TRACKTOR_ARCHIVE_SHA256:
         raise ValueError('Archive checksum differs from the inspected authors-linked archive')
     jobs = [config.DATASET_ROOT/config.DATASET_SPLIT/name
             for name in dict.fromkeys(config.TRAIN_SEQUENCES+config.VAL_SEQUENCES)]
-    jobs += [config.TEST_DATASET_ROOT/config.TEST_DATASET_SPLIT/name for name in config.TEST_SEQUENCES]
+    if not args.train_val_only:
+        jobs += [config.TEST_DATASET_ROOT/config.TEST_DATASET_SPLIT/name for name in config.TEST_SEQUENCES]
     jobs = list(dict.fromkeys(jobs))
     with ZipFile(args.archive) as archive:
         for sequence in tqdm(jobs, desc='Import Tracktor detections', unit='video',

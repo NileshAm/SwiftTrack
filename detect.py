@@ -139,7 +139,7 @@ def run_sequence(sequence_path, detector, *, overall=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--split", choices=("all", "train", "val", "test"), default="all")
+    parser.add_argument("--split", choices=("all", "train", "val", "trainval", "test"), default="all")
     parser.add_argument("--backend", choices=("supplied", "tracktor", "rtdetrv2"),
                         help="Override for this process only; leaves config.py unchanged")
     parser.add_argument("--input-mode", choices=("square", "original"))
@@ -168,7 +168,7 @@ def main():
     }
     jobs, seen, destinations = [], set(), set()
     for split, (root, dataset_split, sequences) in groups.items():
-        if args.split not in ("all", split):
+        if args.split not in ("all", split) and not (args.split == "trainval" and split in ("train", "val")):
             continue
         for sequence in sequences:
             video_key(sequence)  # Validate folder names before forming output paths.

@@ -160,6 +160,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--backend", choices=("supplied", "tracktor", "rtdetrv2", "ddq", "yolox", "iter_e2edet", "cached"), default=config.DETECTION_BACKEND)
     parser.add_argument("--cache-dir", type=Path, help="RT-DETR, DDQ, YOLOX or detector-suite cache directory; reads its recorded recipe")
+    parser.add_argument("--tracktor-cache-dir", type=Path, help="Fresh Tracktor import directory")
     parser.add_argument("--split", choices=("train", "val"), default="val", help="Use val when tuning")
     parser.add_argument("--scores", type=float, nargs="+", default=[0.1, 0.2, 0.3, 0.5, 0.7],
                         help="Explicit confidence sweep; all cached boxes are always also evaluated")
@@ -167,6 +168,10 @@ def main():
     parser.add_argument("--max-frames", type=int, help="First N frames per video, for a quick check")
     parser.add_argument("--output-dir", type=Path, help="New directory; existing reports are never overwritten")
     args = parser.parse_args()
+    if args.tracktor_cache_dir is not None:
+        if args.backend != "tracktor":
+            parser.error("--tracktor-cache-dir requires --backend tracktor")
+        config.TRACKTOR_CACHE_DIR = args.tracktor_cache_dir.resolve()
     if any(not np.isfinite(x) for x in args.scores) or any(not 0 < x <= 1 for x in args.ious):
         parser.error("scores must be finite; IoUs must be in (0,1]")
     if args.max_frames is not None and args.max_frames < 1:

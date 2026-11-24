@@ -16,7 +16,7 @@ sys.path.insert(0, str(PROJECT))
 
 from Utils import config  # noqa: E402
 from Utils.benchmark_boxes import gt_person_cache  # noqa: E402
-from Utils.detections import file_digest, validate_tracktor  # noqa: E402
+from Utils.detections import file_digest, validate_tracktor, validate_cache  # noqa: E402
 from Utils.splits import validate_video_splits  # noqa: E402
 from Utils.yolox_osnet import (cache_for_sequence as validate_yolox,
                               cache_for_checkpoint)  # noqa: E402
@@ -67,6 +67,10 @@ def prepare_detections(detector, sequences, output, args):
             floor = recipe["min_score"]
             if args.detection_min_score is not None and args.detection_min_score < floor:
                 raise ValueError(f"{sequence}: requested score is below Iter cache floor {floor}")
+        elif detector == "rtdetr":
+            file = validate_cache(path)
+            if args.detection_min_score is not None and args.detection_min_score < config.DETECTOR_MIN_SCORE:
+                raise ValueError(f"{sequence}: requested score is below RT-DETR cache floor")
         config.DETECTION_FILES[sequence] = str(file)
     config.DETECTION_BACKEND = "mapped"
 
@@ -75,9 +79,13 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, required=True,
                         help="One detector: exact run folder; multiple: parent folder with one run per detector")
-    parser.add_argument("--detectors", nargs="+", choices=("config", "gt", "tracktor", "yolox", "iter"),
+    parser.add_argument("--detectors", nargs="+", choices=("config", "gt", "tracktor", "yolox", "iter", "rtdetr"),
                         default=("config",), help="Box sources; each gets a separate association model")
     parser.add_argument("--encoder", choices=("config", *ENCODERS), default="config")
+    parser.add_argument("--graph", choices=("on", "off"), default="on",
+                        help="Train graph attention or train the matcher directly on appearance")
+    parser.add_argument("--finetuned-osnet-weights", type=Path,
+                        help="Train association on this newly fine-tuned OSNet checkpoint")
     parser.add_argument("--epochs", type=int, default=config.EPOCHS,
                         help="Total target epoch, including epochs already completed")
     parser.add_argument("--batch-size", type=int, default=config.TRAIN_BATCH_SIZE)
@@ -85,6 +93,8 @@ def main(argv=None):
     parser.add_argument("--learning-rate", type=float, default=config.LEARNING_RATE)
     parser.add_argument("--lookback", type=int, default=config.LOOKBACK_FRAMES)
     parser.add_argument("--detection-min-score", type=float, default=config.DETECTION_MIN_SCORE)
+    parser.add_argument("--new-track-min-score", type=float, default=config.NEW_TRACK_MIN_SCORE,
+                        help="Track birth threshold used by chronological training")
     parser.add_argument("--gt-match-iou", type=float, default=config.GT_MATCH_IOU)
     parser.add_argument("--association-distance-px", type=float,
                         default=config.ASSOCIATION_DISTANCE_PX)
@@ -93,6 +103,10 @@ def main(argv=None):
     parser.add_argument("--match-threshold", type=float, default=config.MATCH_THRESHOLD,
                         help="Saved for inference; not used to optimize training loss")
     parser.add_argument("--tracktor-cache-dir", type=Path, default=config.TRACKTOR_CACHE_DIR)
+    parser.add_argument("--rtdetr-cache-dir", type=Path)
+    parser.add_argument("--rtdetr-weights-dir", type=Path)
+    parser.add_argument("--rtdetr-image-size", type=int, default=960)
+    parser.add_argument("--rtdetr-cache-min-score", type=float, default=0.05)
     parser.add_argument("--yolox-cache-dir", type=Path,
                         help="YOLOX cache to use or create")
     parser.add_argument("--yolox-checkpoint", type=Path,
@@ -150,11 +164,19 @@ def main(argv=None):
         parser.error("Iter options require --detectors iter")
     if args.train_iter and args.iter_checkpoint is not None:
         parser.error("Choose --train-iter or --iter-checkpoint, not both")
+    if (args.rtdetr_cache_dir or args.rtdetr_weights_dir) and "rtdetr" not in args.detectors:
+        parser.error("RT-DETR options require --detectors rtdetr")
+    if "rtdetr" in args.detectors and args.rtdetr_cache_dir is None:
+        parser.error("--detectors rtdetr requires --rtdetr-cache-dir")
+    if args.finetuned_osnet_weights is not None and args.encoder != "osnet":
+        parser.error("--finetuned-osnet-weights requires --encoder osnet")
     if (args.epochs < 1 or args.batch_size < 1 or args.val_batch_size < 1 or args.lookback < 1
             or not math.isfinite(args.learning_rate) or args.learning_rate <= 0):
         parser.error("Epochs, batch sizes, lookback and learning rate must be positive")
     if args.detection_min_score is not None and not 0 <= args.detection_min_score <= 1:
         parser.error("--detection-min-score must be in [0,1]")
+    if not 0 <= args.new_track_min_score <= 1:
+        parser.error("--new-track-min-score must be in [0,1]")
     if not 0 < args.gt_match_iou <= 1:
         parser.error("--gt-match-iou must be in (0,1]")
     if (not math.isfinite(args.association_distance_px) or args.association_distance_px <= 0
@@ -185,6 +207,10 @@ def main(argv=None):
         config.ENCODER_NAME, config.FEATURE_DIM = ENCODERS[args.encoder]
         config.FREEZE_ENCODER = True
         config.USE_PRETRAINED_WEIGHTS = True
+    if args.finetuned_osnet_weights is not None:
+        config.FINETUNED_OSNET_WEIGHTS_PATH = args.finetuned_osnet_weights.resolve()
+        if not config.FINETUNED_OSNET_WEIGHTS_PATH.is_file():
+            parser.error(f"Missing fine-tuned OSNet checkpoint: {config.FINETUNED_OSNET_WEIGHTS_PATH}")
     config.TRAIN_SEQUENCES = args.train_sequences
     config.VAL_SEQUENCES = args.val_sequences
     config.EPOCHS = args.epochs
@@ -194,6 +220,8 @@ def main(argv=None):
     config.LOOKBACK_FRAMES = args.lookback
     config.MAX_MISSED_FRAMES = args.lookback - 1
     config.DETECTION_MIN_SCORE = args.detection_min_score
+    config.TRAIN_USE_GRAPH = args.graph == "on"
+    config.NEW_TRACK_MIN_SCORE = args.new_track_min_score
     config.GT_MATCH_IOU = args.gt_match_iou
     config.ASSOCIATION_DISTANCE_PX = args.association_distance_px
     config.LOSS_ALPHA = args.loss_alpha
@@ -275,6 +303,14 @@ def main(argv=None):
                 "--cache-dir", str(args.iter_cache_dir),
                 "--short-side", str(args.iter_short_side), "--max-size", str(args.iter_max_size),
                 "--min-score", str(args.iter_cache_min_score), "--device", args.device])
+    if "rtdetr" in args.detectors:
+        if args.rtdetr_image_size < 32 or args.rtdetr_image_size % 32 or not 0 <= args.rtdetr_cache_min_score <= 1:
+            parser.error("Invalid RT-DETR cache settings")
+        config.DETECTION_CACHE_DIR = args.rtdetr_cache_dir.resolve()
+        config.DETECTOR_WEIGHTS_DIR = args.rtdetr_weights_dir.resolve() if args.rtdetr_weights_dir else None
+        config.DETECTOR_INPUT_MODE = "square"
+        config.DETECTOR_IMAGE_SIZE = args.rtdetr_image_size
+        config.DETECTOR_MIN_SCORE = args.rtdetr_cache_min_score
     results = {}
     for detector in args.detectors:
         output = outputs[detector]

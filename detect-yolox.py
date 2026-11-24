@@ -76,7 +76,7 @@ def run_sequence(sequence_path, path, detector, overall):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--split', choices=('train','val','test','all'), default='val')
+    parser.add_argument('--split', choices=('train','val','trainval','test','all'), default='val')
     parser.add_argument('--width', type=int, default=1600)
     parser.add_argument('--height', type=int, default=896)
     parser.add_argument('--nms-iou', type=float, default=.7)
@@ -99,7 +99,7 @@ def main(argv=None):
               'test': (config.TEST_DATASET_ROOT, config.TEST_DATASET_SPLIT, config.TEST_SEQUENCES)}
     sequences, seen = [], set()
     for split, (root, dataset_split, names) in groups.items():
-        if args.split not in ('all', split):
+        if args.split not in ('all', split) and not (args.split == 'trainval' and split in ('train', 'val')):
             continue
         for name in names:
             video_key(name)

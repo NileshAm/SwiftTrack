@@ -84,6 +84,7 @@ def validate(model,loader,args,overall):
 def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--output-dir',type=Path,default=config.PROJECT_ROOT/'outputs/yolox_x_mot17_finetune_v1')
+    p.add_argument('--weights-dir',type=Path,default=config.PROJECT_ROOT/'outputs/yolox_weights')
     p.add_argument('--epochs',type=int,default=5,help='Total epoch target; rerun to resume')
     p.add_argument('--width',type=int,default=960);p.add_argument('--height',type=int,default=544)
     p.add_argument('--batch-size',type=int,default=1);p.add_argument('--accumulation',type=int,default=4)
@@ -105,16 +106,20 @@ def main(argv=None):
         random.seed(config.SEED);torch.manual_seed(config.SEED)
         train_data,val_data=build_datasets(args.frame_stride,args.max_frames,train_fraction=args.train_fraction)
         model_args=argparse.Namespace(width=args.width,height=args.height,min_score=.01,nms_iou=.7,
-            checkpoint=None,weights_dir=config.PROJECT_ROOT/'outputs/yolox_weights',device=args.device)
+            checkpoint=None,weights_dir=args.weights_dir,device=args.device)
         detector=YOLOXDetector(model_args,trainable=True);model=detector.model
         recipe=dict(version=VERSION,initial_checkpoint=detector.recipe['checkpoint_sha256'],
-            settings={k:v for k,v in vars(args).items() if k not in ('output_dir','epochs','device')},
+            settings={k:v for k,v in vars(args).items() if k not in ('output_dir','epochs','device','weights_dir')},
             seed=config.SEED,precision='cuda_amp_bfloat16' if torch.device(args.device).type=='cuda' else 'float32',
             train=train_data.sources,val=val_data.sources,box_origin=config.BOX_ORIGIN)
         out=args.output_dir;last=out/'last.pt';best=out/'best.pt'
-        if any(out.iterdir()) and not last.exists() and {x.name for x in out.iterdir()}!={'.lock'}:
-            raise FileExistsError('Nonempty output without last.pt; choose another --output-dir')
+        if any(out.iterdir()) and not last.exists() and not best.exists() and {x.name for x in out.iterdir()}!={'.lock'}:
+            raise FileExistsError('Nonempty output without a completed checkpoint; choose another --output-dir')
         saved=torch.load(last,map_location='cpu',weights_only=True) if last.exists() else None
+        selected_state=torch.load(best,map_location='cpu',weights_only=True) if best.exists() else None
+        if selected_state is not None and (saved is None or selected_state['epoch']>saved['epoch']):
+            saved=selected_state
+            save(saved,last)  # Selected epoch completed before the latest write was interrupted.
         if saved and saved['recipe']!=recipe:raise ValueError('Settings/data changed; choose a new output directory')
         if saved and not best.exists():raise FileNotFoundError('Best checkpoint missing')
         groups=[dict(params=[p for n,p in model.named_parameters() if n.startswith('backbone.') and p.requires_grad],lr=args.backbone_lr),
@@ -153,6 +158,14 @@ def main(argv=None):
                 (out/'history.csv.pending').replace(out/'history.csv')
                 p_text='n/a' if chosen['precision'] is None else f"{chosen['precision']:.4f}"
                 tqdm.write(f"Epoch {number}: F1={chosen['f1']:.4f} P={p_text} R={chosen['recall']:.4f} score={chosen['score']}")
+        # A pause can land after best.pt is saved but before its inference export.
+        # Repair that export from the selected completed checkpoint on resume.
+        export=out/'best.pth'
+        if best.is_file() and (not export.is_file() or best.stat().st_mtime_ns>export.stat().st_mtime_ns):
+            selected=torch.load(best,map_location='cpu',weights_only=True)
+            save(dict(state_dict=selected['model'],meta=dict(dataset_meta=dict(classes=('person',)),
+                yolox_training=dict(version=VERSION,epoch=selected['epoch'],recipe=selected['recipe'],
+                                    selection=selected['best_selection']))),export)
         return out
 
 if __name__=='__main__':main()

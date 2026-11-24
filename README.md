@@ -4,6 +4,8 @@ This repository compares pedestrian tracking on disjoint MOT17 training and vali
 
 Use the existing `dragon-track` Conda environment. Select complete train and validation videos in [Utils/config.py](Utils/config.py); keep the video lists disjoint. Generated detections, checkpoints, and evaluation reports live in `detections/` and `outputs/`.
 
+For the ordered five-epoch final comparison with new detection caches, see [final-ouput/README.md](final-ouput/README.md). `python final-train.py` previews commands; `python final-train.py --run` starts the experiment.
+
 ```bash
 conda activate dragon-track
 cd /home/nilesh/UOM/CV/Project/ModifiedCode

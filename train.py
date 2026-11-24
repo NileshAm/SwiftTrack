@@ -183,7 +183,7 @@ def _run_epoch(model, frame_pairs, encoder, optimizer=None, *, overall=None):
                 if not any((ids > 0).any() for ids in identities):
                     totals["skipped_pairs"] += 1
                 else:
-                    output = model(graph)
+                    output = model(graph, use_graph=config.TRAIN_USE_GRAPH)
                     totals["max_marginal_error"] = max(totals["max_marginal_error"], output["marginal_error"].item())
                     totals["max_normalization_error"] = max(totals["max_normalization_error"], output["normalization_error"].item())
                     losses = compute_loss(output, targets, valid,

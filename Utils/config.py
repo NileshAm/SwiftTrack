@@ -75,8 +75,10 @@ ENCODER_NAME = "detr_resnet50"
 # Encoder comparison: densenet121 -> 1024, detr_resnet50 -> 256, osnet_reid -> 512.
 # Each encoder needs separately trained association weights and a unique RUN_NAME.
 REID_WEIGHTS_PATH = PROJECT_ROOT / "weights" / "reid" / "osnet_x1_0_msmt17.pth"
+FINETUNED_OSNET_WEIGHTS_PATH = None  # Optional MOT-trained OSNet best.pt for association training/inference.
 USE_PRETRAINED_WEIGHTS = True  # Official DETR weights are already cached in dragon-track.
 FREEZE_ENCODER = True  # Restore original pretrained DETR features; train only graph/association weights.
+TRAIN_USE_GRAPH = True  # False trains the matcher on raw appearance without graph attention.
 DETR_GRADIENT_CHECKPOINTING = False  # Faster with spare VRAM; True trades compute for less memory.
 FEATURE_DIM = 256  # DETR transformer encoder features, pooled inside each supplied box.
 DETR_MODEL_NAME = "facebook/detr-resnet-50"
