@@ -49,3 +49,9 @@ These commands are prepared but have not been run here. Replace `epoch_20.pth` w
 The older step-by-step implementation notes are in [Documentation/Implementation](Documentation/Implementation/README.md). They describe development history; some retired experiment commands in those notes were removed from the active repository.
 
 For independent train, inference and evaluation commands for **our implementation**, see [Baselines/OurImplementation/README.md](Baselines/OurImplementation/README.md). This supports the same GT, Tracktor and YOLOX box comparison as the authors' baseline while recording the checkpoint and detector used for every run.
+
+The [Iter-E2EDET + fine-tuned OSNet guide](Documentation/Implementation/37-iter-e2edet-osnet.md) covers the separate crowded-scene detector export, detector-only report, and full tracker evaluation.
+
+The selected pretrained Iter-E2EDET inference baseline is **960/1600**. The [resolution comparison and tracking-threshold guide](Documentation/Implementation/38-iter-resolution-experiment.md) explains the three-size evaluation and the tracking-only search on its completed cache.
+
+For detector adaptation on the configured MOT17 training videos, use the [Iter-E2EDET fine-tuning guide](Documentation/Implementation/39-iter-e2edet-finetune.md). It keeps the authors' model and losses, selects a checkpoint using detection F1 on the validation videos, and exports to a separate cache.

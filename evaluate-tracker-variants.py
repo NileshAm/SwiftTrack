@@ -23,6 +23,7 @@ from Utils.detections import file_digest, validate_tracktor
 from Utils.features import extract_features, load_encoder
 from Utils.outputs import tracking_context
 from Utils.yolox_osnet import cache_for_sequence as yolox_cache_for_sequence
+from Utils.itere2edet import cache_for_sequence as iter_cache_for_sequence
 from model import AssociationModel, MODEL_VERSION
 import tracking
 
@@ -106,7 +107,7 @@ def save_table(root,rows,settings):
     lines=['# Tracker and detector baseline comparison','',
            'Validation MOT17-02-SDP and MOT17-09-SDP. GT person IDs are never supplied to the tracker.',
            f"Detection read score: {settings['detection_min_score']}; new-track score: {settings['new_track_min_score']}.",
-           'Tracktor detection scores are placeholders (1.0); the score filter only has meaning for YOLOX.',
+           'Tracktor detection scores are placeholders (1.0); confidence filtering applies to YOLOX and Iter-E2EDET.',
            'No-GCN bypasses attention only; both arms use the same learned Sinkhorn matcher and checkpoint.',
            'Fine-tuned OSNet uses the graph trained on frozen OSNet features (transfer); no dedicated fine-tuned graph checkpoint exists.',
            'These are repeatedly used validation sequences; treat the table as an internal baseline, not an independent test score.','',
@@ -140,6 +141,12 @@ def resolve_sources(names,sequences,args,root):
                 if args.detection_min_score<identity['min_score']:
                     raise ValueError(f'{sequence}: read score is below the YOLOX cache floor')
                 digest=summary['sha256']
+            elif detector=='iter_e2edet':
+                path,summary=iter_cache_for_sequence(args.iter_cache_dir,sequence_path,args.iter_checkpoint)
+                identity=summary['identity']['detector']
+                if args.detection_min_score<identity['min_score']:
+                    raise ValueError(f'{sequence}: read score is below the Iter-E2EDET cache floor')
+                digest=summary['sha256']
             else:
                 path=gt_cache(sequence_path,root/'gt_detection_cache'/sequence)
                 identity={'backend':'ground_truth_boxes','score_note':'IDs excluded; score 1.0'}
@@ -153,9 +160,11 @@ def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--encoder',choices=('all',*VARIANTS),default='all')
     parser.add_argument('--graph',choices=('both','on','off'),default='both')
-    parser.add_argument('--detections',choices=('both','tracktor','yolox','gt'),default='both')
+    parser.add_argument('--detections',choices=('both','tracktor','yolox','iter_e2edet','gt'),default='both')
     parser.add_argument('--tracktor-cache-dir',type=Path,default=config.TRACKTOR_CACHE_DIR)
     parser.add_argument('--yolox-cache-dir',type=Path,default=ROOT/'detections/yolox_x_mot20_val_v1')
+    parser.add_argument('--iter-cache-dir',type=Path,default=ROOT/'detections/iter_e2edet_resolution_v2/higher_960_1600')
+    parser.add_argument('--iter-checkpoint',type=Path,help='Authors CrowdHuman model.pth used to make the cache')
     parser.add_argument('--detection-min-score',type=float,default=0.5)
     parser.add_argument('--new-track-min-score',type=float,default=0.7)
     parser.add_argument('--frozen-osnet-association',type=Path,default=DEFAULT_ASSOCIATION['frozen_osnet'])
@@ -166,6 +175,8 @@ def main(argv=None):
     parser.add_argument('--output-dir',type=Path)
     parser.add_argument('--smoke-test',action='store_true',help='Check each selected arm on one frame; no TrackEval')
     args=parser.parse_args(argv)
+    if args.detections=='iter_e2edet' and (args.iter_checkpoint is None or not args.iter_checkpoint.is_file()):
+        parser.error('--detections iter_e2edet requires --iter-checkpoint pointing to the exported model')
     if not 0<=args.detection_min_score<=1 or not 0<=args.new_track_min_score<=1:
         parser.error('Detection and new-track scores must be in [0,1]')
     variants=VARIANTS if args.encoder=='all' else (args.encoder,)
