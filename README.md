@@ -271,3 +271,5 @@ See [YOLOX + OSNet tracking](Documentation/Implementation/32-yolox-osnet.md).
 To test OSNet identity fine-tuning without changing the detector, run `python osnet-train.py --lr 1e-5 --epochs 5`, then pass its `best.pt` with `track-yolox-osnet.py --osnet-checkpoint`. See [OSNet fine-tuning](Documentation/Implementation/34-osnet-finetuning.md).
 
 To isolate the detector change, run `python track-tracktor-osnet.py --detection-min-score 0.5 --new-track-min-score 0.7`, then `python evaluate-tracktor-osnet.py <printed-run-folder>`. See [matched Tracktor + OSNet comparison](Documentation/Implementation/33-tracktor-osnet-cosine.md).
+
+For the fixed 12-arm Tracktor/YOLOX × encoder × GCN validation baseline, run `python evaluate-tracker-variants.py`. The [baseline readings](Documentation/Implementation/38-detector-tracker-baseline.md) record the exact results and settings; the [evaluation guide](Documentation/Implementation/37-tracker-encoder-graph-evaluation.md) explains individual arms and the optional GT-box control.
