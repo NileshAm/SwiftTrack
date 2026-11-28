@@ -49,7 +49,7 @@ def resolve_source(sequence_path, backend):
                 or recipe.get("format") != "mot_person_v1" or recipe.get("box_origin") != 1
                 or (backend in ("ddq", "yolox") and recipe.get("backend") != backend)
                 or (backend == "rtdetrv2" and recipe.get("backend", "rtdetrv2") != "rtdetrv2")
-                or (backend == "cached" and recipe.get("backend") not in ('yolo26', 'rfdetr', 'fasterrcnn'))
+                or (backend == "cached" and not isinstance(recipe.get("backend"), str))
                 or metadata.get("sha256") != file_digest(path)):
             raise ValueError(f"Incomplete, changed, or incompatible detection cache: {path}")
     else:
